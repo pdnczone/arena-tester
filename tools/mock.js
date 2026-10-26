@@ -27,6 +27,8 @@ function mockApi(kind, port) {
     } else {
       if (req.method === 'POST' && u === '/api/login') { const j = JSON.parse(body || '{}'); return send(j.password ? 200 : 401, j.password ? { id: 1 } : { error: 'bad credentials' }, 'nexora_session=xyz; Path=/'); }
       if (u === '/api/v1/inbounds') return send(200, { items: [{ id: 1, type: 'vless', tag: 'in1' }], total: 1, limit: 1000, offset: 0 });
+      if (u === '/api/v1/nodes') return send(200, { items: [{ id: 1, name: 'local', status: 'connected', enabled: true, templateId: 1, up: Date.now() * 1000, down: Date.now() * 2000, coreVersion: '1.0', live: { connections: 77, host: { memTotal: 4e9, memUsed: 1.6e9, load1: 0.7 } } }], total: 1 });
+      if (u === '/api/nodes/1/info') return send(200, { num_cpu: 2 });
       if (u === '/api/panel/info') return send(200, { version: '0.0.3', num_cpu: 2, sys_mem_total: 4e9, sys_mem_used: 1.5e9, load_avg_1: 0.5, mem_sys: 60e6 });
       if (req.method === 'POST' && u === '/api/v1/users/generate') {
         const j = JSON.parse(body); const created = [];
