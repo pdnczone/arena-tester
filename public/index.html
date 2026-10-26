@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>VPN Arena</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="toolbar">
+  <div class="title"><span id="brand" aria-hidden="true"></span><b>VPN Arena</b></div>
+
+  <div class="seg" id="typeSeg" role="radiogroup" aria-label="نوع تست">
+    <button data-v="panel" role="radio" title="تست خود پنل با درخواست HTTP"><span class="gi"></span><span>پنل</span></button>
+    <button data-v="vpn" role="radio" title="تست ترافیک VPN با اتصال همزمان"><span class="gi"></span><span>VPN</span></button>
+  </div>
+  <div class="seg" id="modeSeg" role="radiogroup" aria-label="نحوه اجرا">
+    <button data-v="parallel" role="radio" title="هر دو پنل همزمان تست شوند"><span class="gi"></span><span>همزمان</span></button>
+    <button data-v="sequential" role="radio" title="پنل‌ها یکی‌یکی تست شوند"><span class="gi"></span><span>پشت‌سرهم</span></button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="progress" role="progressbar" aria-label="پیشرفت تست" title="پیشرفت تست">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><circle class="rb" cx="14" cy="14" r="11"/><circle class="rf" id="ring" cx="14" cy="14" r="11"/></svg>
+    <span id="clock" class="mono">00:00</span>
+  </div>
+  <button class="tbtn" id="setupBtn" title="تنظیم پله‌ها و آستانه‌ها"></button>
+  <button class="tbtn" id="settingsBtn" title="آدرس و مشخصات سرورها"></button>
+  <button class="tbtn" id="recBtn" aria-pressed="false" title="حالت ضبط: مخفی کردن IP و اطلاعات حساس"></button>
+  <button class="start" id="startBtn" title="شروع تست"></button>
+</header>
+
+<div id="banners" role="status"></div>
+
+<main>
+  <section class="group race" id="race" aria-label="مسابقه ظرفیت"></section>
+  <section class="arena" id="arena"></section>
+
+  <section class="deck">
+    <div class="peaks" id="peaks"></div>
+    <div class="cgrid">
+      <figure class="cbox"><figcaption><span id="ic_p95"></span><span id="t_p95">تأخیر</span></figcaption><canvas id="cmp_p95" role="img" aria-label="نمودار تأخیر نسبت به تعداد کاربر"></canvas></figure>
+      <figure class="cbox"><figcaption><span id="ic_err"></span><span>خطا</span></figcaption><canvas id="cmp_err" role="img" aria-label="نمودار درصد خطا نسبت به تعداد کاربر"></canvas></figure>
+      <figure class="cbox"><figcaption><span id="ic_cpu"></span><span>CPU سرور</span></figcaption><canvas id="cmp_cpu" role="img" aria-label="نمودار مصرف CPU نسبت به تعداد کاربر"></canvas></figure>
+      <figure class="cbox"><figcaption><span id="ic_thr"></span><span id="t_thr">توان عملیاتی</span></figcaption><canvas id="cmp_thr" role="img" aria-label="نمودار توان عملیاتی نسبت به تعداد کاربر"></canvas></figure>
+    </div>
+    <div class="dl"><a href="/api/report.csv">CSV</a><a href="/api/report.json">JSON</a></div>
+  </section>
+</main>
+
+<div id="toasts" role="status" aria-live="polite"></div>
+
+<dialog id="setup" aria-label="تنظیم تست">
+  <div class="dhead"><b>تنظیم تست</b><button type="button" id="setupClose" class="plain" aria-label="بستن">✕</button></div>
+  <div class="dbody" id="setupBody"></div>
+</dialog>
+
+<dialog id="dlg" aria-label="تنظیمات سرورها"><form method="dialog" id="dlgForm"></form></dialog>
+
+<script src="chart.umd.js"></script>
+<script src="app.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>
