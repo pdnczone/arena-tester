@@ -83,7 +83,11 @@ function initStatic() {
   $('#recBtn').innerHTML = ic('rec') + '<span>ضبط</span>';
   ['p95', 'err', 'cpu', 'thr'].forEach((k, i) => { $('#ic_' + k).innerHTML = ic(['clock', 'alert', 'cpu', 'activity'][i]); });
 }
+const enabledTargets = () => (cfg ? cfg.targets.filter((t) => t.enabled !== false) : []);
 function applyType() {
+  const solo = enabledTargets().length < 2;
+  document.body.classList.toggle('solo', solo);
+  if (solo) ui.mode = 'parallel';
   document.body.classList.toggle('vpn', ui.type === 'vpn');
   $$('#typeSeg button').forEach((b) => b.setAttribute('aria-checked', b.dataset.v === ui.type));
   $$('#modeSeg button').forEach((b) => b.setAttribute('aria-checked', b.dataset.v === ui.mode));
@@ -241,9 +245,9 @@ function paintBanners() {
 function buildRace() {
   const box = $('#race');
   Object.keys(lanes).forEach((k) => delete lanes[k]);
-  box.innerHTML = `<div class="sh"><h2>مسابقه‌ی ظرفیت</h2><div class="keys">
+  box.innerHTML = `<div class="sh"><h2>${Object.keys(S.targets).length > 1 ? 'مسابقه‌ی ظرفیت' : 'ظرفیت سرور'}</h2><div class="keys">
       <span class="k-ok">${ic('check')}<b>پله‌ی سالم</b></span><span class="k-bad">${ic('xoct')}<b>نقطه‌ی شکست</b></span>
-      <span>${ic('down')}ظرفیت پایدار</span><span style="color:#d99a00">${ic('crown')}<b style="color:var(--l2)">برنده</b></span></div></div>
+      <span>${ic('down')}ظرفیت پایدار</span><span class="k-win" style="color:#d99a00">${ic('crown')}<b style="color:var(--l2)">برنده</b></span></div></div>
     <div id="lanes"></div><div class="foot" id="verdict" style="padding:6px 0 8px"></div>`;
   Object.values(S.targets).forEach((t) => {
     const el = document.createElement('div');
@@ -282,6 +286,9 @@ function paintRace() {
     const cap = (t) => `${t.result.reachedMax ? '≥ ' : ''}${fmt(t.result.capacity)}`;
     const line = T.map((t) => `${t.name}: ${cap(t)} کاربر`).join('  ·  ');
     v.textContent = (S.winner === 'tie' ? 'نتیجه: مساوی' : `برنده: ${S.targets[S.winner].name}`) + ' — ظرفیت پایدار ' + line;
+  } else if (T.length === 1 && Object.keys(S.targets).length === 1 && ['done', 'stopped'].includes(S.status)) {
+    const t = T[0];
+    v.textContent = `ظرفیت پایدار ${t.name}: ${t.result.reachedMax ? '≥ ' : ''}${fmt(t.result.capacity)} کاربر` + (t.result.brokeAt ? ` — شکست در ${fmt(t.result.brokeAt)} کاربر` : ' — تا سقف تست نشکست');
   } else v.textContent = '';
 }
 
@@ -535,6 +542,7 @@ function rebuild() {
   }
   thrRef = 1;
   Object.values(S.targets).forEach((t) => t.series.forEach((p) => { thrRef = Math.max(thrRef, thrOf(p)); }));
+  $('#arena').classList.toggle('solo', Object.keys(S.targets).length < 2);
   buildRace();
   Object.values(S.targets).forEach(buildCard);
   Object.values(S.targets).forEach((t) => {

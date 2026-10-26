@@ -12,6 +12,8 @@ function targetFieldset(t) {
   const kind = t.kind || 'custom';
   const pv = t.provision;
   return `<fieldset data-id="${t.id}" data-kind="${kind}"><legend>سرور ${t.id}</legend>
+    <label class="tgl"><input type="checkbox" name="enabled" ${t.enabled !== false ? 'checked' : ''}><span>این سرور در تست شرکت کند</span><small>برای تست فقط یک سرور، سرور دیگر را خاموش کنید</small></label>
+    <div class="tbody">
     <div class="step"><b>۱</b> اتصال به پنل</div>
     <div class="row">
       ${fld('نام نمایشی', 'name', t.name, 'text', '', false)}
@@ -72,6 +74,7 @@ function targetFieldset(t) {
       </div>
       <div class="testout" data-out="adv"></div>
     </details>
+    </div>
   </fieldset>`;
 }
 
@@ -122,13 +125,14 @@ async function saveForm() {
     let steps;
     try { steps = JSON.parse(q('steps').value || '[]'); } catch { throw new Error('JSON سناریو در سرور ' + fs.dataset.id + ' معتبر نیست'); }
     body.targets.push({
-      id: fs.dataset.id, name: q('name').value, kind: q('kind').value, panelUrl: q('panelUrl').value.trim(), username: q('username').value,
+      id: fs.dataset.id, enabled: q('enabled').checked, name: q('name').value, kind: q('kind').value, panelUrl: q('panelUrl').value.trim(), username: q('username').value,
       password: q('password').value, apiToken: q('apiToken').value, agentUrl: q('agentUrl').value.trim(), agentToken: q('agentToken').value,
       panelProc: q('panelProc').value.trim(), coreProc: q('coreProc').value.trim(), insecureTls: q('insecureTls').value === '1', steps,
       subscriptionUrls: q('subscriptionUrls').dataset.touched === '1' ? lines(q('subscriptionUrls').value) : null,
       links: q('links').dataset.touched === '1' ? lines(q('links').value) : null,
     });
   });
+  if (!body.targets.some((t) => t.enabled)) throw new Error('حداقل یک سرور باید در تست شرکت کند');
   await api('/api/config', 'PUT', body);
 }
 
@@ -137,8 +141,9 @@ function wireTarget(fs) {
   const q = (n) => fs.querySelector(`[name=${n}]`);
   const out = (k) => fs.querySelector(`[data-out=${k}]`);
   const show = (k, txt) => { const o = out(k); o.style.display = 'block'; o.textContent = txt; };
-  const sync = () => { fs.dataset.kind = q('kind').value; };
+  const sync = () => { fs.dataset.kind = q('kind').value; fs.dataset.on = q('enabled').checked ? '1' : '0'; };
   q('kind').onchange = sync;
+  q('enabled').onchange = sync;
   sync();
   api('/api/enroll-command/' + id).then((r) => { fs.querySelector('[data-cmd]').value = r.command; if (r.enrolled) out('agent').textContent = '✓ ایجنت متصل است (برای نصب دوباره همین دستور را اجرا کنید)'; }).catch(() => {});
   fs.onclick = async (e) => {

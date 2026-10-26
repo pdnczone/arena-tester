@@ -222,3 +222,13 @@ fieldset:not([data-kind="nexora"]) .only-nexora { display: none; }
 details.adv { margin-top: 16px; } details.adv summary { cursor: pointer; font-size: 14px; color: var(--l2); margin-bottom: 10px; }
 .testout[style*="block"] { display: block; }
 .testout { direction: rtl; unicode-bidi: plaintext; text-align: start; font-family: var(--font); }
+
+/* ---------- single-server mode ---------- */
+.tgl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 4px 4px; cursor: pointer; font-weight: 600; font-size: 14px; }
+.tgl input { width: 18px; height: 18px; accent-color: var(--tint); }
+.tgl small { color: var(--l2); font-weight: 400; font-size: 12px; }
+fieldset[data-on="0"] .tbody { display: none; }
+fieldset[data-on="0"] { opacity: .75; }
+.arena.solo { grid-template-columns: minmax(0, 820px); justify-content: center; }
+body.solo #modeSeg { display: none; }
+body.solo .k-win { display: none; }
