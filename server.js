@@ -14,6 +14,8 @@ const { parseCurl } = require('./lib/curl');
 const { preset3xui } = require('./lib/config');
 const links = require('./lib/links');
 const { pollAgent } = require('./lib/agentClient');
+const { getDriver } = require('./lib/drivers');
+const RAW_BASE = process.env.RAW_BASE || 'https://raw.githubusercontent.com/pdnczone/arena-tester/main';
 
 const PORT = Number(process.env.PORT) || 8080;
 const PASSWORD = process.env.DASH_PASSWORD || '';
@@ -34,6 +36,8 @@ const authorized = (header) => {
   return pass === PASSWORD;
 };
 app.use((req, res, next) => {
+  // agents enrolling themselves authenticate with a per-panel enrollment token instead of the dashboard password
+  if (req.method === 'POST' && req.path === '/api/enroll') return next();
   if (authorized(req.headers.authorization)) {
     // browsers do not always forward Basic credentials on the websocket upgrade: give them a cookie too
     if (PASSWORD && !wsTokens.has(cookieOf(req.headers.cookie, 'vb_ws'))) {
@@ -55,6 +59,61 @@ app.put('/api/config', wrap((req, res) => {
   store.update(req.body);
   res.json(store.masked());
 }));
+// ---- panel drivers: connect / auto-provision test users / clean up ----
+const driverOf = (id) => {
+  const t = store.target(id);
+  if (!t) throw new Error('unknown target');
+  const d = getDriver(t);
+  if (!d) throw new Error('fill in panel type, URL and login (or API token) first');
+  return { t, d };
+};
+app.post('/api/connect', wrap(async (req, res) => {
+  const { d } = driverOf(req.body.id);
+  await d.login();
+  const status = await d.status().catch((e) => ({ error: e.message }));
+  res.json({ ok: true, status });
+}));
+app.post('/api/provision', wrap(async (req, res) => {
+  if (runner.isRunning()) throw new Error('stop the running test first');
+  const { t, d } = driverOf(req.body.id);
+  const r = await d.provision({ count: req.body.count, protocol: req.body.protocol, port: req.body.port });
+  store.setProvision(t.id, r);
+  res.json({ ok: true, count: r.meta.count, port: r.meta.port, protocol: r.meta.protocol, subscriptions: r.subscriptionUrls.length, note: r.note });
+}));
+app.post('/api/deprovision', wrap(async (req, res) => {
+  if (runner.isRunning()) throw new Error('stop the running test first');
+  const { t, d } = driverOf(req.body.id);
+  const r = await d.deprovision();
+  store.clearProvision(t.id);
+  res.json({ ok: true, removed: r.removed });
+}));
+
+// ---- agent enrollment: one pasted command on the panel server, no manual config afterwards ----
+app.get('/api/enroll-command/:id', wrap((req, res) => {
+  const t = store.target(req.params.id);
+  if (!t) throw new Error('unknown target');
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  const url = `${proto}://${req.headers.host}`;
+  res.json({ command: `curl -fsSL ${RAW_BASE}/agent/install.sh | sudo ENROLL_URL=${url} ENROLL_TOKEN=${t.enrollToken} bash`, enrolled: !!t.agentUrl });
+}));
+app.post('/api/enroll', wrap((req, res) => {
+  const { token, agentUrl, agentToken } = req.body || {};
+  const t = store.get().targets.find((x) => token && x.enrollToken === token);
+  if (!t) return res.status(403).json({ error: 'bad enrollment token' });
+  if (!/^https?:\/\/[^\s]+$/.test(String(agentUrl || ''))) return res.status(400).json({ error: 'bad agentUrl' });
+  t.agentUrl = agentUrl;
+  t.agentToken = String(agentToken || '');
+  store.save();
+  broadcast({ type: 'config' });
+  res.json({ ok: true, name: t.name });
+}));
+
+app.get('/api/myip', wrap(async (req, res) => {
+  const { fetch } = require('undici');
+  const r = await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) });
+  res.json({ ip: (await r.text()).trim() });
+}));
+
 app.get('/api/state', (req, res) => res.json(runner.snapshot()));
 app.post('/api/start', wrap((req, res) => {
   runner.start(req.body || {});

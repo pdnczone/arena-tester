@@ -24,9 +24,17 @@ if [ ! -f .env ]; then
 fi
 
 docker compose up -d --build
-IP="$(curl -fsS https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+IP="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+PASS="$(grep '^DASH_PASSWORD=' .env | cut -d= -f2-)"
 echo
-echo "arena-tester is running:  http://$IP:8080   (any username, password from .env)"
-echo "IMPORTANT: open ports 8080 (dashboard) and 8081 (test download source) only to your own IPs:"
+echo "=========================================================="
+echo "  arena-tester is ready"
+echo
+echo "  Dashboard : http://$IP:8080"
+echo "  Password  : $PASS      (username: anything)"
+echo "=========================================================="
+echo "Next: open the dashboard -> Servers, add your panels, done."
+echo "Firewall (if ufw is on): allow 8080 for you and for the servers under test (agent sign-up),"
+echo "and 8081 only for the servers under test:"
 echo "  ufw allow from <YOUR_IP> to any port 8080 proto tcp"
-echo "  ufw allow from <SERVER_A_IP> to any port 8081 proto tcp   # and the same for server B"
+echo "  ufw allow from <SERVER_IP> to any port 8080,8081 proto tcp"

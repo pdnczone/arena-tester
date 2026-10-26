@@ -149,6 +149,8 @@ function handle(m) {
   } else if (m.type === 'status' && S) {
     S.status = m.status;
     paintTop();
+  } else if (m.type === 'config') {
+    loadConfig().then(paintBanners).catch(() => {});
   } else if (m.type === 'event' && S) {
     S.events.push(m.ev);
     onEvent(m.ev);
@@ -227,6 +229,7 @@ setInterval(() => { if (S && isRunning()) paintTop(); }, 1000);
 function paintBanners() {
   if (!S) return;
   const out = [];
+  if (cfg && !cfg.targets.some((t) => t.panelUrl || t._has.links || t._has.subs)) out.push(['', 'برای شروع روی «سرورها» بزنید و آدرس و ورود هر پنل را بدهید؛ ساخت کاربران تست و نصب ایجنت از همان‌جا خودکار انجام می‌شود.']);
   if (S.warnings && S.warnings.includes('gen')) out.push(['', 'CPU یا کارت شبکه‌ی سرور سوم (مولد بار) بالای ۸۵٪ رفته؛ نتیجه محدودیت خود سرور سوم است، نه پنل‌ها.']);
   const protos = Object.values(S.targets).map((t) => t.protocol).filter(Boolean);
   if (S.type === 'vpn' && new Set(protos).size > 1) out.push(['', 'پروتکل/ترنسپورت دو پنل یکی نیست (' + protos.join(' ≠ ') + ')؛ مقایسه عادلانه نیست.']);
