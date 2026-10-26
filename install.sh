@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # arena-tester installer for the load-generator server ("server 3"), Ubuntu/Debian.
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/arena-tester/main/install.sh | sudo bash
-# Optional env: DASH_PASSWORD=...  DIR=/opt/arena-tester  REPO=https://github.com/OWNER/arena-tester.git
+#   curl -fsSL https://raw.githubusercontent.com/pdnczone/arena-tester/main/install.sh | sudo bash
+# Optional env: DASH_PASSWORD=...  DIR=/opt/arena-tester  REPO=https://github.com/pdnczone/arena-tester.git
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)"; exit 1; }
-REPO="${REPO:-__REPO_URL__}"
+REPO="${REPO:-https://github.com/pdnczone/arena-tester.git}"
 DIR="${DIR:-/opt/arena-tester}"
 
 if ! command -v docker >/dev/null; then

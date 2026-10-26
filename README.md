@@ -2,7 +2,7 @@
 
 ## نصب سریع (روی سرور سوم، Ubuntu/Debian)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/__OWNER__/arena-tester/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/pdnczone/arena-tester/main/install.sh | sudo bash
 ```
 Docker را در صورت نبودن نصب می‌کند، پروژه را در `/opt/arena-tester` می‌گذارد، یک رمز تصادفی برای داشبورد می‌سازد (در `.env`) و برنامه را بالا می‌آورد. آدرس و رمز را آخر اجرا چاپ می‌کند. به‌روزرسانی: همان دستور را دوباره بزنید.
 
