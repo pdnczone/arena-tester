@@ -16,13 +16,19 @@ command -v curl >/dev/null || { apt-get update -y && apt-get install -y curl; }
 mkdir -p "$DIR"
 if [ -f "$(dirname "$0")/agent.py" ] && [ "${0##*/}" = "install.sh" ]; then cp "$(dirname "$0")/agent.py" "$DIR/agent.py"; else curl -fsSL "$RAW_BASE/agent/agent.py" -o "$DIR/agent.py"; fi
 
+# Token lives in a 600 file, not in the world-readable unit.
+cat >"$DIR/env" <<ENV
+TOKEN=$TOKEN
+PORT=$PORT
+ENV
+chmod 600 "$DIR/env"
+
 cat >/etc/systemd/system/arena-agent.service <<UNIT
 [Unit]
 Description=arena-tester agent
 After=network.target
 [Service]
-Environment=TOKEN=$TOKEN
-Environment=PORT=$PORT
+EnvironmentFile=$DIR/env
 ExecStart=/usr/bin/python3 $DIR/agent.py
 Restart=always
 [Install]

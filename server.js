@@ -23,8 +23,24 @@ const store = new Store();
 const runner = new Runner(store);
 
 const crypto = require('crypto');
-const wsTokens = new Set();
+const wsTokens = new Map(); // token -> issuedAt
+const WS_TTL_MS = 7 * 24 * 3600 * 1000;
 const cookieOf = (h, n) => ((h || '').split(';').map((s) => s.trim()).find((s) => s.startsWith(n + '=')) || '').slice(n.length + 1);
+const hasWsToken = (t) => {
+  if (!t || !wsTokens.has(t)) return false;
+  if (Date.now() - wsTokens.get(t) > WS_TTL_MS) { wsTokens.delete(t); return false; }
+  return true;
+};
+const issueWsToken = (res) => {
+  const now = Date.now();
+  if (wsTokens.size > 200) {
+    for (const [k, at] of wsTokens) if (now - at > WS_TTL_MS) wsTokens.delete(k);
+    if (wsTokens.size > 200) wsTokens.clear(); // shortcut: drop all rather than LRU when still full
+  }
+  const t = crypto.randomBytes(16).toString('hex');
+  wsTokens.set(t, now);
+  res.setHeader('Set-Cookie', `vb_ws=${t}; HttpOnly; SameSite=Strict; Path=/`);
+};
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 
@@ -40,11 +56,7 @@ app.use((req, res, next) => {
   if (req.method === 'POST' && req.path === '/api/enroll') return next();
   if (authorized(req.headers.authorization)) {
     // browsers do not always forward Basic credentials on the websocket upgrade: give them a cookie too
-    if (PASSWORD && !wsTokens.has(cookieOf(req.headers.cookie, 'vb_ws'))) {
-      const t = crypto.randomBytes(16).toString('hex');
-      wsTokens.add(t);
-      res.setHeader('Set-Cookie', `vb_ws=${t}; HttpOnly; SameSite=Strict; Path=/`);
-    }
+    if (PASSWORD && !hasWsToken(cookieOf(req.headers.cookie, 'vb_ws'))) issueWsToken(res);
     return next();
   }
   res.set('WWW-Authenticate', 'Basic realm="vpn-bench"').status(401).end('auth required');
@@ -57,6 +69,7 @@ app.get('/api/config', (req, res) => res.json(store.masked()));
 app.put('/api/config', wrap((req, res) => {
   if (runner.isRunning()) throw new Error('stop the running test first');
   store.update(req.body);
+  ensureBlob(store.get().generator.blobPort);
   res.json(store.masked());
 }));
 // ---- panel drivers: connect / auto-provision test users / clean up ----
@@ -222,7 +235,7 @@ app.post('/api/test/agent', wrap(async (req, res) => {
 }));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws', verifyClient: (info) => authorized(info.req.headers.authorization) || wsTokens.has(cookieOf(info.req.headers.cookie, 'vb_ws')) });
+const wss = new WebSocketServer({ server, path: '/ws', verifyClient: (info) => authorized(info.req.headers.authorization) || hasWsToken(cookieOf(info.req.headers.cookie, 'vb_ws')) });
 const send = (ws, obj) => ws.readyState === 1 && ws.send(JSON.stringify(obj));
 const broadcast = (obj) => wss.clients.forEach((ws) => send(ws, obj));
 wss.on('connection', (ws) => send(ws, { type: 'snapshot', state: runner.snapshot() }));
@@ -240,8 +253,17 @@ runner.on('done', (state) => {
   broadcast({ type: 'snapshot', state });
 });
 
-const blob = fork(path.join(__dirname, 'lib', 'blob.js'), [String(Number(store.get().generator.blobPort) || 8081)]);
-process.on('exit', () => blob.kill());
+let blob = null;
+let blobPortLive = 0;
+function ensureBlob(port) {
+  const p = Number(port) || 8081;
+  if (blob && !blob.killed && blobPortLive === p) return;
+  if (blob) try { blob.kill(); } catch { /* ignore */ }
+  blobPortLive = p;
+  blob = fork(path.join(__dirname, 'lib', 'blob.js'), [String(p)]);
+}
+ensureBlob(store.get().generator.blobPort);
+process.on('exit', () => { if (blob) blob.kill(); });
 ['SIGINT', 'SIGTERM'].forEach((sig) => process.on(sig, () => process.exit(0)));
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`vpn-bench dashboard:  http://localhost:${PORT}${PASSWORD ? '  (password protected)' : '  (NO password — set DASH_PASSWORD)'}`);

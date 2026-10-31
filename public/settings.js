@@ -19,6 +19,7 @@ function targetFieldset(t) {
       ${fld('نام نمایشی', 'name', t.name, 'text', '', false)}
       <div class="f"><label>نوع پنل</label><select name="kind">${Object.entries(KIND_LABEL).map(([k, v]) => `<option value="${k}" ${k === kind ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
       ${fld('آدرس پنل (با مسیر مخفی، اگر دارد)', 'panelUrl', t.panelUrl, 'text', 'http://1.2.3.4:2053/مسیر')}
+      ${fld('آدرس عمومی اینباند (خالی = از آدرس پنل)', 'inboundHost', t.inboundHost || '', 'text', '5.6.7.8 یا vpn.example.com', false, 'only-3xui')}
       ${fld('نام کاربری ادمین', 'username', t.username)}
       ${fld('رمز عبور ادمین', 'password', '', 'password', h.password ? '•••• ذخیره شده' : '')}
       <div class="f only-nexora"><label>یا توکن API (برای حساب‌های 2FA)</label><input name="apiToken" type="password" class="secret" placeholder="${h.apiToken ? '•••• ذخیره شده' : 'اختیاری'}" autocomplete="off"></div>
@@ -125,7 +126,7 @@ async function saveForm() {
     let steps;
     try { steps = JSON.parse(q('steps').value || '[]'); } catch { throw new Error('JSON سناریو در سرور ' + fs.dataset.id + ' معتبر نیست'); }
     body.targets.push({
-      id: fs.dataset.id, enabled: q('enabled').checked, name: q('name').value, kind: q('kind').value, panelUrl: q('panelUrl').value.trim(), username: q('username').value,
+      id: fs.dataset.id, enabled: q('enabled').checked, name: q('name').value, kind: q('kind').value, panelUrl: q('panelUrl').value.trim(), inboundHost: q('inboundHost').value.trim(), username: q('username').value,
       password: q('password').value, apiToken: q('apiToken').value, agentUrl: q('agentUrl').value.trim(), agentToken: q('agentToken').value,
       panelProc: q('panelProc').value.trim(), coreProc: q('coreProc').value.trim(), insecureTls: q('insecureTls').value === '1', steps,
       subscriptionUrls: q('subscriptionUrls').dataset.touched === '1' ? lines(q('subscriptionUrls').value) : null,

@@ -117,7 +117,10 @@ $('#recBtn').onclick = () => {
 function connect() {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.onmessage = (m) => handle(JSON.parse(m.data));
-  ws.onclose = () => setTimeout(connect, 1500);
+  ws.onclose = () => {
+    // refresh vb_ws cookie after server restart (old token is gone)
+    fetch('/').catch(() => {}).finally(() => setTimeout(connect, 1500));
+  };
 }
 
 function handle(m) {

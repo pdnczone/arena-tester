@@ -3,13 +3,12 @@
   "version": "1.0.0",
   "description": "Visual load-test arena for VPN panels (3x-ui vs Nexora)",
   "main": "server.js",
-  "scripts": { "start": "node server.js", "mock": "node tools/mock.js" },
+  "scripts": { "start": "node server.js", "mock": "node tools/mock.js", "test": "node tools/selftest.js" },
   "engines": { "node": ">=18" },
   "dependencies": {
     "express": "^4.19.2",
     "socks": "^2.8.3",
     "undici": "^6.19.8",
-    "ws": "^8.18.0",
-    "chart.js": "^4.4.4"
+    "ws": "^8.18.0"
   }
 }
