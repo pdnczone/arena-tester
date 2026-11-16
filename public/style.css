@@ -243,3 +243,6 @@ input, select, textarea, button { min-height: 36px; }
 select { padding-inline-end: 8px; }
 .f label { font-size: 13px; }
 .row { gap: 14px 16px; }
+button.danger { color: var(--bad); }
+#addsrv { background: color-mix(in srgb, var(--tint) 10%, var(--bg)); }
+#addsrv .hint { margin: 0 0 10px; font-size: 14px; }

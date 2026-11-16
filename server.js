@@ -109,8 +109,30 @@ app.get('/api/enroll-command/:id', wrap((req, res) => {
   const url = `${proto}://${req.headers.host}`;
   res.json({ command: `curl -fsSL ${RAW_BASE}/agent/install.sh | sudo ENROLL_URL=${url} ENROLL_TOKEN=${t.enrollToken} bash`, enrolled: !!t.agentUrl });
 }));
+// One command for ALL new servers: run it on a panel server and that server adds itself to the dashboard.
+app.get('/api/join-command', wrap((req, res) => {
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  const url = `${proto}://${req.headers.host}`;
+  res.json({ command: `curl -fsSL ${RAW_BASE}/agent/install.sh | sudo ENROLL_URL=${url} JOIN_TOKEN=${store.get().joinToken} bash` });
+}));
+app.delete('/api/target/:id', wrap((req, res) => {
+  if (runner.isRunning()) throw new Error('stop the running test first');
+  store.removeTarget(req.params.id);
+  broadcast({ type: 'config' });
+  res.json({ ok: true });
+}));
 app.post('/api/enroll', wrap((req, res) => {
-  const { token, agentUrl, agentToken } = req.body || {};
+  const b = req.body || {};
+  const { token, agentUrl, agentToken } = b;
+  if (b.joinToken) {
+    const ok = String(b.joinToken).length === store.get().joinToken.length && crypto.timingSafeEqual(Buffer.from(String(b.joinToken)), Buffer.from(store.get().joinToken));
+    if (!ok) return res.status(403).json({ error: 'bad join token' });
+    if (!/^https?:\/\/[^\s]+$/.test(String(agentUrl || ''))) return res.status(400).json({ error: 'bad agentUrl' });
+    const { t, created } = store.enrollJoin(b);
+    broadcast({ type: 'config' });
+    broadcast({ type: 'event', ev: { kind: 'ok', text: `سرور «${t.name}» ${created ? 'اضافه شد' : 'به‌روز شد'}` } });
+    return res.json({ ok: true, id: t.id, name: t.name, created });
+  }
   const t = store.get().targets.find((x) => token && x.enrollToken === token);
   if (!t) return res.status(403).json({ error: 'bad enrollment token' });
   if (!/^https?:\/\/[^\s]+$/.test(String(agentUrl || ''))) return res.status(400).json({ error: 'bad agentUrl' });

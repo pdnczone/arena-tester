@@ -157,7 +157,7 @@ function handle(m) {
     S.status = m.status;
     paintTop();
   } else if (m.type === 'config') {
-    loadConfig().then(paintBanners).catch(() => {});
+    loadConfig().then(() => { paintBanners(); if (window.onServersChanged) window.onServersChanged(); }).catch(() => {});
   } else if (m.type === 'event' && S) {
     S.events.push(m.ev);
     onEvent(m.ev);

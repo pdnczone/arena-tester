@@ -11,7 +11,7 @@ function targetFieldset(t) {
   const h = t._has || {};
   const kind = t.kind || 'custom';
   const pv = t.provision;
-  return `<fieldset data-id="${t.id}" data-kind="${kind}"><legend>سرور ${t.id}</legend>
+  return `<fieldset data-id="${t.id}" data-kind="${kind}"><legend>${esc(t.name || 'سرور ' + t.id)} <small class="cap">${h.agent ? '· ایجنت متصل' : ''}</small></legend>
     <label class="tgl"><input type="checkbox" name="enabled" ${t.enabled !== false ? 'checked' : ''}><span>این سرور در تست شرکت کند</span><small>برای تست فقط یک سرور، سرور دیگر را خاموش کنید</small></label>
     <div class="tbody">
     <div class="step"><b>۱</b> اتصال به پنل</div>
@@ -25,7 +25,7 @@ function targetFieldset(t) {
       <div class="f only-nexora"><label>یا توکن API (برای حساب‌های 2FA)</label><input name="apiToken" type="password" class="secret" placeholder="${h.apiToken ? '•••• ذخیره شده' : 'اختیاری'}" autocomplete="off"></div>
       <div class="f"><label>گواهی TLS نامعتبر (self-signed)</label><select name="insecureTls"><option value="0">رد شود</option><option value="1" ${t.insecureTls ? 'selected' : ''}>قبول شود</option></select></div>
     </div>
-    <div class="btns"><button type="button" data-act="connect" class="primary">اتصال و بررسی</button></div>
+    <div class="btns"><button type="button" data-act="connect" class="primary">اتصال و بررسی</button><button type="button" data-act="remove" class="ghost danger">حذف این سرور</button></div>
     <div class="testout" data-out="connect"></div>
 
     <div class="step only-api"><b>۲</b> کاربران تست (خودکار از طریق API پنل)</div>
@@ -86,7 +86,7 @@ async function openSettings() {
   $('#dlgForm').innerHTML = `
     <div class="dhead"><b>سرورها</b><button type="button" id="dclose" class="plain" aria-label="بستن">✕</button></div>
     <div class="dbody">
-      <fieldset id="gen"><legend>سرور سوم (همین داشبورد)</legend>
+      <fieldset id="gen"><legend>همین داشبورد (منبع ترافیک تست)</legend>
         <div class="row">
           <div class="f"><label>IP عمومی این سرور (برای تست VPN)</label><div class="inl"><input name="publicHost" class="secret" value="${esc(g.publicHost)}" placeholder="5.6.7.8"><button type="button" data-act="myip">تشخیص خودکار</button></div></div>
           ${fld('سرعت کارت شبکه این سرور (Mbps)', 'nicMbps', g.nicMbps, 'number', '', false)}
@@ -99,6 +99,11 @@ async function openSettings() {
           ${fld('مکث بین درخواست‌های هر کاربر (ms)', 'thinkMs', T.thinkMs, 'number', '', false)}
         </div></details>
       </fieldset>
+      <fieldset id="addsrv"><legend>➕ افزودن سرور جدید</legend>
+        <div class="hint">این دستور را روی سرور پنل (SSH) اجرا کنید. ایجنت نصب می‌شود، نوع پنل و آدرس‌ها خودکار تشخیص داده می‌شود و سرور همین‌جا به لیست اضافه می‌شود؛ ورود دستی لازم نیست. برای سرور بعدی هم همین دستور را روی آن سرور بزنید.</div>
+        <div class="cmdbox"><textarea readonly rows="3" data-joincmd class="secret"></textarea><button type="button" data-act="copyjoin" class="primary">کپی دستور</button></div>
+        <div class="status" id="joinstat">منتظر سرور جدید… (با اجرای دستور، این پنجره خودکار به‌روز می‌شود)</div>
+      </fieldset>
       ${cfg.targets.map(targetFieldset).join('')}
     </div>
     <div class="dfoot"><button type="button" id="dsave" class="primary">ذخیره و بستن</button></div>`;
@@ -106,6 +111,12 @@ async function openSettings() {
   $('#dclose').onclick = () => $('#dlg').close();
   $('#dsave').onclick = async () => { try { await saveForm(); $('#dlg').close(); await loadConfig(); paintBanners(); } catch (e) { alert(e.message); } };
   $$('#dlgForm textarea[data-touched]').forEach((ta) => ta.addEventListener('input', () => (ta.dataset.touched = '1')));
+  api('/api/join-command').then((r) => { $('#addsrv [data-joincmd]').value = r.command; }).catch(() => {});
+  $('#addsrv').onclick = async (e) => {
+    if (e.target.dataset.act !== 'copyjoin') return;
+    await navigator.clipboard.writeText($('#addsrv [data-joincmd]').value);
+    e.target.textContent = 'کپی شد ✓'; setTimeout(() => (e.target.textContent = 'کپی دستور'), 1500);
+  };
   $('#gen').onclick = async (e) => {
     if (e.target.dataset.act !== 'myip') return;
     try { $('#gen [name=publicHost]').value = (await api('/api/myip')).ip; } catch (err) { alert(err.message); }
@@ -153,6 +164,13 @@ function wireTarget(fs) {
     const btn = e.target;
     try {
       if (act === 'copy') { await navigator.clipboard.writeText(fs.querySelector('[data-cmd]').value); btn.textContent = 'کپی شد ✓'; setTimeout(() => (btn.textContent = 'کپی'), 1500); return; }
+      if (act === 'remove') {
+        if (!confirm('این سرور از داشبورد حذف شود؟ (پنل و کاربران تست روی خود سرور دست نمی‌خورند)')) return;
+        await api('/api/target/' + id, 'DELETE');
+        await loadConfig();
+        await openSettings();
+        return;
+      }
       if (act === 'preset') { q('steps').value = JSON.stringify((await api('/api/preset/3xui')).steps, null, 2); return; }
       if (act === 'curl') { fs.querySelector('.curlbox').hidden = !fs.querySelector('.curlbox').hidden; return; }
       if (act === 'curlAdd') {
@@ -196,3 +214,12 @@ function wireTarget(fs) {
   };
 }
 $('#settingsBtn').onclick = () => openSettings().catch((e) => alert(e.message));
+
+// A server enrolled itself (install command finished): refresh the open dialog, keeping unsaved edits out of the way.
+window.onServersChanged = async () => {
+  const d = $('#dlg');
+  if (!d.open) return;
+  const stat = $('#joinstat');
+  if (stat) stat.textContent = '✓ یک سرور جدید اضافه شد — لیست به‌روز شد';
+  if ($('#addsrv')) { await saveForm().catch(() => {}); openSettings().catch(() => {}); }
+};
