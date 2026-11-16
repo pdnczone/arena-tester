@@ -56,18 +56,32 @@ echo ">> agent running on http://$MYIP:$PORT"
 
 # Best-effort detection of what runs on this machine, so the dashboard needs no manual entry.
 KIND=custom; PANEL_PROC=""; CORE_PROC=xray; PANEL_URL=""; PANEL_USER=""; PANEL_PASS=""
-if command -v x-ui >/dev/null 2>&1; then
+# Detection is best effort: a grep that finds nothing must never abort the install (set -e + pipefail would).
+set +e +o pipefail
+field() { echo "$1" | grep -iE "^\s*$2\s*:" | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d ' \r'; }
+if command -v x-ui >/dev/null 2>&1 || [ -x /usr/local/x-ui/x-ui ]; then
   KIND=3xui; PANEL_PROC=x-ui
-  SHOW="$(x-ui setting -show true 2>/dev/null || true)"
-  XPORT="$(echo "$SHOW" | grep -iE '^\s*port' | grep -oE '[0-9]+' | head -1)"
-  XBASE="$(echo "$SHOW" | grep -iE 'webBasePath' | sed -E 's/^[^:]*:\s*//' | tr -d ' \r' | head -1)"
-  XUSER="$(echo "$SHOW" | grep -iE '^\s*username' | sed -E 's/^[^:]*:\s*//' | tr -d ' \r' | head -1)"
-  XPASS="$(echo "$SHOW" | grep -iE '^\s*password' | sed -E 's/^[^:]*:\s*//' | tr -d ' \r' | head -1)"
-  XCERT="$(x-ui setting -getCert true 2>/dev/null | grep -iE 'cert' | sed -E 's/^[^:]*:\s*//' | tr -d ' \r' | head -1)"
-  SCHEME=http; [ -n "$XCERT" ] && SCHEME=https
+  # The real binary (the "x-ui" on PATH is often just the menu script). Bool flags without "true".
+  XBIN=/usr/local/x-ui/x-ui; [ -x "$XBIN" ] || XBIN="$(command -v x-ui)"
+  SHOW="$(timeout 15 "$XBIN" setting -show 2>/dev/null)"
+  XPORT="$(field "$SHOW" port | grep -oE '[0-9]+' | head -1)"
+  XBASE="$(field "$SHOW" webBasePath)"
+  XUSER="$(field "$SHOW" username)"
+  XPASS="$(field "$SHOW" password)"
+  if [ "$(field "$SHOW" hasDefaultCredential)" = "true" ] && [ -z "$XUSER" ]; then XUSER=admin; XPASS=admin; fi
+  XCERT="$(field "$(timeout 15 "$XBIN" setting -getCert 2>/dev/null)" cert)"
+  SCHEME=http; HOSTN="$MYIP"
+  if [ -n "$XCERT" ]; then
+    SCHEME=https
+    # The certificate is issued for a domain, not the IP: use that domain or TLS verification fails.
+    D="$(openssl x509 -in "$XCERT" -noout -ext subjectAltName 2>/dev/null | grep -oE 'DNS:[^, ]+' | head -1 | cut -d: -f2)"
+    [ -n "$D" ] || D="$(openssl x509 -in "$XCERT" -noout -subject 2>/dev/null | grep -oE 'CN *= *[^,/]+' | sed -E 's/CN *= *//')"
+    [ -n "$D" ] || D="$(basename "$(dirname "$XCERT")")"
+    case "$D" in *.*) HOSTN="${D#\*.}";; esac
+  fi
   if [ -n "$XPORT" ]; then
     case "$XBASE" in /*) ;; "") XBASE="/";; *) XBASE="/$XBASE";; esac
-    PANEL_URL="$SCHEME://$MYIP:$XPORT${XBASE%/}"
+    PANEL_URL="$SCHEME://$HOSTN:$XPORT${XBASE%/}"
   fi
   PANEL_USER="$XUSER"
   case "$XPASS" in \$2*|"") ;; *) PANEL_PASS="$XPASS";; esac   # never a bcrypt hash
@@ -75,6 +89,7 @@ elif systemctl list-unit-files 2>/dev/null | grep -qi nexora || pgrep -f nexora 
   KIND=nexora; PANEL_PROC=nexora-panel
 fi
 MACHINE_ID="$( (cat /etc/machine-id 2>/dev/null || hostname) | sha256sum | cut -c1-32)"
+set -e -o pipefail
 
 register() { # $1 = extra JSON fields (token)
   ARENA_KIND="$KIND" ARENA_PROC="$PANEL_PROC" ARENA_CORE="$CORE_PROC" ARENA_PURL="$PANEL_URL" ARENA_PUSER="$PANEL_USER" ARENA_PPASS="$PANEL_PASS" \
