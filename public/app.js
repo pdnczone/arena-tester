@@ -200,6 +200,7 @@ function healthOf(t) {
 }
 function pillOf(t, h) {
   if (t.status === 'error') return ['xoct', 'خطا در راه‌اندازی'];
+  if (t.status === 'preparing') return ['hourglass', 'ساخت کاربران تست…'];
   if (t.status === 'waiting') return ['minus', 'در انتظار نوبت'];
   if (t.status === 'stopped') return ['minus', 'متوقف شد'];
   if (t.status === 'finished') return t.brokeAt ? ['xoct', 'از کار افتاد'] : ['check', 'تا سقف دوام آورد'];
