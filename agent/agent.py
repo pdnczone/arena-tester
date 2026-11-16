@@ -68,9 +68,37 @@ def read_sockstat():
     return out
 
 
+def read_limits():
+    """conntrack table use (a full table silently drops new connections), OOM kills so far, swap in use."""
+    out = {"ct": None, "ctMax": None, "oom": None, "swapMB": None}
+    for k, f in (("ct", "/proc/sys/net/netfilter/nf_conntrack_count"), ("ctMax", "/proc/sys/net/netfilter/nf_conntrack_max")):
+        try:
+            with open(f) as fh:
+                out[k] = int(fh.read().strip())
+        except (OSError, ValueError):
+            pass
+    try:
+        with open("/proc/vmstat") as fh:
+            for line in fh:
+                if line.startswith("oom_kill "):
+                    out["oom"] = int(line.split()[1])
+    except OSError:
+        pass
+    try:
+        m = {}
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                k, v = line.split(":", 1)
+                m[k] = int(v.split()[0])
+        out["swapMB"] = round((m.get("SwapTotal", 0) - m.get("SwapFree", 0)) / 1024)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 def scan_procs(names):
     """Return {name: (cpu_ticks, rss_kb)} summed over processes whose comm/cmdline matches."""
-    res = {n: [0, 0] for n in names}
+    res = {n: [0, 0, 0] for n in names}
     page_kb = os.sysconf("SC_PAGE_SIZE") // 1024
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
@@ -82,6 +110,7 @@ def scan_procs(names):
             rest = s[s.rindex(")") + 2 :].split()
             ticks = int(rest[11]) + int(rest[12])
             rss = int(rest[21]) * page_kb
+            start = int(rest[19])
             hit = [n for n in names if n in comm.lower()]
             if not hit:
                 with open(f"/proc/{pid}/cmdline", "rb") as f:
@@ -90,6 +119,7 @@ def scan_procs(names):
             for n in hit:
                 res[n][0] += ticks
                 res[n][1] += rss
+                res[n][2] = max(res[n][2], start)
         except (OSError, ValueError, IndexError):
             continue
     return res
@@ -112,12 +142,12 @@ def sampler():
             names = [n for n, ts in tracked.items() if now - ts < 60]
         procs = scan_procs(names) if names else {}
         pout = {}
-        for n, (ticks, rss) in procs.items():
+        for n, (ticks, rss, start) in procs.items():
             prev = pprocs.get(n)
             cpu = 0.0
             if prev is not None and ticks >= prev:
                 cpu = (ticks - prev) / CLK / dt * 100  # % of ONE core
-            pout[n] = {"cpu": round(cpu, 1), "rssMB": round(rss / 1024, 1)}
+            pout[n] = {"cpu": round(cpu, 1), "rssMB": round(rss / 1024, 1), "start": start}
         pprocs = {n: v[0] for n, v in procs.items()}
         la = os.getloadavg()[0]
         snap = {
@@ -133,6 +163,7 @@ def sampler():
             "procs": pout,
         }
         snap.update(read_sockstat())
+        snap.update(read_limits())
         with lock:
             latest = snap
         pt, pi, prx, ptx, pnow = t, i, rx, tx, now

@@ -40,14 +40,27 @@ check('breachReason uses real active, not requested users', () => {
   assert.equal(r.breachReason({ active: 50, userKbps: 1800, errPct: 0, p95: 0, rps: 0 }), null);
 });
 
-check('real traffic breaks on speed quality, not on average speed', () => {
+check('real traffic breaks on what users feel and on server limits', () => {
   const r = new Runner({ get() { return { test: {}, targets: [], generator: {} }; } });
-  r.p = { type: 'vpn', trafficMode: 'real', userKbps: 20000, minUserPct: 70, maxErrPct: 2, maxP95Ms: 1500 };
-  // low average per-user speed is normal for real users (most are idle or chatting)
-  assert.equal(r.breachReason({ active: 50, userKbps: 300, qualityPct: 95, qN: 40, errPct: 0, p95: 0, rps: 0 }), null);
-  assert.match(r.breachReason({ active: 50, userKbps: 300, qualityPct: 40, qN: 40, errPct: 0, p95: 0, rps: 0 }), /کیفیت سرعت/);
-  // too few finished transfers to judge
-  assert.equal(r.breachReason({ active: 50, userKbps: 300, qualityPct: 40, qN: 3, errPct: 0, p95: 0, rps: 0 }), null);
+  r.p = { type: 'vpn', trafficMode: 'real', userKbps: 0, minApdex: 85, maxErrPct: 2, maxP95Ms: 1500 };
+  const ok = { active: 50, userKbps: 300, errPct: 0, p95: 4000, rps: 20, apdex: 95, apdexN: 80, probeP95: 400, probeN: 40, videoN: 30, stallPct: 1, memPct: 60, ct: 1000, ctMax: 7680 };
+  // low average speed and a slow first byte on a paced download are normal for real users
+  assert.equal(r.breachReason(ok), null);
+  assert.match(r.breachReason({ ...ok, apdex: 70 }), /رضایت کاربران/);
+  assert.equal(r.breachReason({ ...ok, apdex: 70, apdexN: 5 }), null); // too few to judge
+  assert.match(r.breachReason({ ...ok, probeP95: 2500 }), /کند شد/);
+  assert.match(r.breachReason({ ...ok, stallPct: 12 }), /ویدیو/);
+  assert.match(r.breachReason({ ...ok, ct: 7500 }), /conntrack/);
+  assert.match(r.breachReason({ ...ok, memPct: 97 }), /RAM/);
+});
+
+check('real traffic: steps are long enough for load to build up', () => {
+  const seen = [];
+  const store = { get() { return { test: { stepSeconds: 15, graceSec: 6, startUsers: 10, stepUsers: 10, maxUsers: 50, trafficMode: 'real' }, generator: {}, targets: [{ id: 'A', name: 'A', enabled: true, links: ['x'] }] }; } };
+  const r = new Runner(store);
+  r.main = async () => { seen.push({ s: r.p.stepSeconds, g: r.p.graceSec }); };
+  r.start({});
+  assert.deepEqual(seen[0], { s: 60, g: 20 });
 });
 
 check('startUsers clamped to maxUsers', () => {

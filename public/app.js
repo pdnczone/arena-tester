@@ -57,7 +57,7 @@ const ic = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 let cfg = null;
 let S = null;
 let ui = { type: 'panel', mode: 'parallel' };
-let ctl = { startUsers: 50, stepUsers: 50, stepSeconds: 15, maxUsers: 2000, maxErrPct: 2, maxP95Ms: 1500, userKbps: 2000, minUserPct: 70, trafficMode: 'real' };
+let ctl = { startUsers: 25, stepUsers: 25, stepSeconds: 60, maxUsers: 2000, maxErrPct: 2, maxP95Ms: 1500, userKbps: 0, minUserPct: 70, minApdex: 85, trafficMode: 'real' };
 const realTraffic = () => (S && S.params && isRunning() ? S.params.trafficMode : ctl.trafficMode) !== 'steady';
 const cards = {};
 const lanes = {};
@@ -65,7 +65,7 @@ const cmp = {};
 let thrRef = 1;
 const isRunning = () => S && ['starting', 'running', 'cooldown', 'stopping'].includes(S.status);
 const isVpn = () => (S && S.type ? S.type : ui.type) === 'vpn';
-const P = () => ({ minUserPct: 70, ...ctl, ...(S && S.params ? S.params : {}) });
+const P = () => ({ minUserPct: 70, minApdex: 85, ...ctl, ...(S && S.params ? S.params : {}) });
 const last = (t) => (t.series && t.series.length ? t.series[t.series.length - 1] : null);
 const thrOf = (p) => (p ? (isVpn() ? p.mbps : p.rps) : 0);
 const idxOf = (id) => Math.max(0, Object.keys(S.targets).indexOf(id));
@@ -196,6 +196,12 @@ function healthOf(t) {
   if (t.status === 'broken' || t.status === 'error') return 'bad';
   if (t.status === 'waiting' || t.status === 'stopped' || !p) return 'idle';
   if (t.status === 'finished') return t.brokeAt ? 'bad' : 'ok';
+  if (isVpn() && realTraffic()) {
+    let q = Math.max(p.errPct / X.maxErrPct, (p.probeP95 || 0) / X.maxP95Ms);
+    if (p.apdex != null && p.apdexN >= 20) q = Math.max(q, (100 - p.apdex) / Math.max(1, 100 - X.minApdex));
+    if (p.ctMax) q = Math.max(q, p.ct / p.ctMax / 0.95);
+    return q >= 1 ? 'bad' : q >= 0.6 ? 'warn' : 'ok';
+  }
   let r = Math.max(p.p95 / X.maxP95Ms, p.errPct / X.maxErrPct);
   if (isVpn() && X.userKbps > 0 && p.active >= 10) r = Math.max(r, ((X.userKbps * X.minUserPct) / 100) / Math.max(p.userKbps, 1));
   return r >= 1 ? 'bad' : r >= 0.5 ? 'warn' : 'ok';
@@ -205,13 +211,19 @@ function pillOf(t, h) {
   if (t.status === 'preparing') return ['hourglass', 'ساخت کاربران تست…'];
   if (t.status === 'waiting') return ['minus', 'در انتظار نوبت'];
   if (t.status === 'stopped') return ['minus', 'متوقف شد'];
-  if (t.status === 'finished') return t.brokeAt ? ['xoct', 'از کار افتاد'] : ['check', 'تا سقف دوام آورد'];
+  if (t.status === 'finished') {
+    if (t.result && t.result.limitedBy) return ['alert', 'تست‌کننده به سقفش رسید'];
+    if (t.result && t.result.confirmed) return ['check', `ظرفیت ${fmt(t.result.capacity)} تأیید شد`];
+    return t.brokeAt ? ['xoct', 'از کار افتاد'] : ['check', 'تا سقف دوام آورد'];
+  }
+  if (t.status === 'broken' && last(t) && last(t).confirm) return ['hourglass', `تأیید ظرفیت در ${fmt(last(t).users)} کاربر…`];
   if (h === 'bad') return ['xoct', 'از کار افتاد'];
   if (h === 'warn') return ['alert', 'افت کیفیت'];
   if (h === 'ok') return ['check', 'پایدار'];
   return ['minus', 'در حال آماده‌سازی'];
 }
 function stableUsers(t) {
+  if (t.result) return t.result.capacity;
   let cap = 0;
   for (const s of t.steps) { if (!s.ok || (t.brokeAt && s.users >= t.brokeAt.users)) break; cap = s.users; }
   return cap;
@@ -309,12 +321,16 @@ function paintRace() {
   const v = $('#verdict');
   const T = Object.values(S.targets).filter((t) => t.result);
   if (S.winner && T.length > 1) {
-    const cap = (t) => `${t.result.reachedMax ? '≥ ' : ''}${fmt(t.result.capacity)}`;
+    const cap = (t) => `${t.result.reachedMax || t.result.limitedBy ? '≥ ' : ''}${fmt(t.result.capacity)}`;
     const line = T.map((t) => `${t.name}: ${cap(t)} کاربر`).join('  ·  ');
     v.textContent = (S.winner === 'tie' ? 'نتیجه: مساوی' : `برنده: ${S.targets[S.winner].name}`) + ' — ظرفیت پایدار ' + line;
   } else if (T.length === 1 && Object.keys(S.targets).length === 1 && ['done', 'stopped'].includes(S.status)) {
     const t = T[0];
-    v.textContent = `ظرفیت پایدار ${t.name}: ${t.result.reachedMax ? '≥ ' : ''}${fmt(t.result.capacity)} کاربر` + (t.result.brokeAt ? ` — شکست در ${fmt(t.result.brokeAt)} کاربر` : ' — تا سقف تست نشکست');
+    const R = t.result;
+    v.textContent = `ظرفیت پایدار ${t.name}: ${R.reachedMax || R.limitedBy ? '≥ ' : ''}${fmt(R.capacity)} کاربر هم‌زمان آنلاین`
+      + (R.limitedBy ? ' — سرور داشبورد زودتر از پنل به سقفش رسید؛ عدد واقعی بالاتر است'
+        : R.brokeAt ? ` — شکست در ${fmt(R.brokeAt)} کاربر (${R.reason})` + (R.confirmed === true ? '؛ ظرفیت با چند دقیقه نگه‌داشتن تأیید شد' : R.confirmed === false ? '؛ این عدد هم در نگه‌داشتن پایدار نماند' : '')
+        : ' — تا سقف تست نشکست');
   } else v.textContent = '';
 }
 
@@ -327,6 +343,7 @@ const GAUGES = [
   { k: 'thr', icon: 'activity', label: '' },
   { k: 'spd', icon: 'bolt', label: 'سرعت هر کاربر', vpn: true },
   { k: 'db', icon: 'server', label: 'ساخت کاربر روی پنل' },
+  { k: 'conn', icon: 'link', label: 'اتصال‌های باز سرور' },
 ];
 const gaugeHtml = (g) => `<div class="g c-none" data-k="${g.k}"><div class="ring"><svg class="r" viewBox="0 0 64 64" aria-hidden="true"><circle class="bgr" cx="32" cy="32" r="26"/><circle class="fgr" cx="32" cy="32" r="26"/>${g.limit ? '<line class="tk" x1="53.7" y1="28.6" x2="61.6" y2="27.3"/>' : ''}</svg><span class="gi">${ic(g.icon)}</span></div><div class="gv"><span class="gx"></span><span class="gt">—</span></div><div class="gl">${g.label}</div></div>`;
 function setGauge(card, k, frac, level, text) {
@@ -458,7 +475,7 @@ function paintCard(id) {
   $('#tlbl', el).textContent = vpn ? 'Mbps پهنای باند' : 'درخواست در ثانیه';
   const fin = $('#fin', el);
   fin.hidden = !t.result;
-  if (t.result) $('#capv', el).textContent = (t.result.reachedMax ? '≥ ' : '') + fmt(t.result.capacity);
+  if (t.result) $('#capv', el).textContent = (t.result.reachedMax || t.result.limitedBy ? '≥ ' : '') + fmt(t.result.capacity);
   // dot field
   const unit = Math.max(1, Math.round(X.maxUsers / N));
   $('#unit', el).textContent = `هر نقطه ≈ ${fmt(unit)} کاربر`;
@@ -471,8 +488,19 @@ function paintCard(id) {
   const has = p.cpu != null;
   setGauge(el, 'cpu', has ? p.cpu / 100 : 0, has ? lvLoad(p.cpu) : 'idle', has ? fmt(p.cpu) + '%' : 'بدون ایجنت');
   setGauge(el, 'ram', p.memPct != null ? p.memPct / 100 : 0, p.memPct != null ? lvLoad(p.memPct) : 'idle', p.memPct != null ? fmt(p.memPct) + '%' : 'بدون ایجنت');
-  const rl = (p.p95 || 0) / X.maxP95Ms;
-  setGauge(el, 'lat', rl / 1.25, p.p95 == null ? 'idle' : lvLim(rl), p.p95 == null ? '—' : fmt(p.p95) + ' ms');
+  const rt = vpn && realTraffic();
+  $('.gl', $('.g[data-k=lat]', el)).textContent = rt ? 'پاسخ‌دهی VPN (p95)' : 'تأخیر (p95)';
+  const lv = rt ? p.probeP95 : p.p95;
+  const rl = (lv || 0) / X.maxP95Ms;
+  setGauge(el, 'lat', rl / 1.25, lv == null ? 'idle' : lvLim(rl), lv == null ? '—' : fmt(lv) + ' ms');
+  // open connections on the server, against its conntrack table when it has one
+  const cg = $('.g[data-k=conn]', el);
+  cg.style.display = rt && p.tcp != null ? '' : 'none';
+  if (rt && p.tcp != null) {
+    const fr = p.ctMax ? p.ct / p.ctMax : p.tcp / 20000;
+    setGauge(el, 'conn', fr, fr >= 0.95 ? 'bad' : fr >= 0.75 ? 'warn' : 'ok', fmt(p.tcp) + (p.ctMax ? ` · ${Math.round(fr * 100)}%` : ''));
+    cg.title = p.ctMax ? `TCP باز: ${fmt(p.tcp)} — conntrack: ${fmt(p.ct)} از ${fmt(p.ctMax)}` : `TCP باز: ${fmt(p.tcp)}`;
+  }
   const re = (p.errPct || 0) / X.maxErrPct;
   setGauge(el, 'err', re / 1.25, p.p95 == null ? 'idle' : lvLim(re), p.p95 == null ? '—' : fmt(p.errPct, 1) + '%');
   const thrG = $('.g[data-k=thr]', el);
@@ -489,10 +517,13 @@ function paintCard(id) {
   const sg = $('.g[data-k=spd]', el);
   if (vpn && realTraffic()) {
     sg.style.display = '';
-    $('.gl', sg).textContent = 'کیفیت سرعت';
-    const q = p.qualityPct;
-    const enough = q != null && p.qN >= 5;
-    setGauge(el, 'spd', enough ? q / 100 : 0, enough ? (q < X.minUserPct ? 'bad' : q < X.minUserPct + 15 ? 'warn' : 'ok') : 'idle', enough ? q + '%' : '—');
+    $('.gl', sg).textContent = 'رضایت کاربران';
+    const q = p.apdex;
+    const enough = q != null && p.apdexN >= 10;
+    setGauge(el, 'spd', enough ? q / 100 : 0, enough ? (q < X.minApdex ? 'bad' : q < X.minApdex + 7 ? 'warn' : 'ok') : 'idle', enough ? q + '%' : '—');
+    const by = p.apdexBy || {};
+    const NM = { chat: 'پیام‌رسان', social: 'اینستاگرام', web: 'وب', video: 'ویدیو', download: 'دانلود' };
+    sg.title = Object.entries(by).map(([k, v]) => `${NM[k] || k}: ${v}%`).join(' · ') + (p.videoN ? ` — گیر ویدیو ${p.stallPct}%` : '');
   } else sg.style.display = vpn && X.userKbps > 0 ? '' : 'none';
   if (vpn && !realTraffic() && X.userKbps > 0) {
     $('.gl', sg).textContent = 'سرعت هر کاربر';
@@ -622,19 +653,20 @@ $('#startBtn').onclick = async () => {
 const SLIDERS = [
   ['startUsers', 'users', 1, 2000, 10, 'شروع از چند کاربر', ''],
   ['stepUsers', 'trend', 1, 1000, 1, 'افزایش هر پله (کاربر)', ''],
-  ['stepSeconds', 'clock', 5, 60, 1, 'مدت هر پله', ' ثانیه'],
+  ['stepSeconds', 'clock', () => (ctl.trafficMode === 'steady' ? 5 : 60), 600, 5, () => (ctl.trafficMode === 'steady' ? 'مدت هر پله' : 'مدت هر پله (حداقل ۶۰ ثانیه تا بار واقعی روی سرور جمع شود)'), ' ثانیه'],
   ['maxUsers', 'flag', 100, 20000, 100, 'سقف کاربر', ''],
   ['maxErrPct', 'alert', 0.5, 20, 0.5, 'حداکثر خطای مجاز', '%'],
-  ['maxP95Ms', 'hourglass', 100, 5000, 50, 'حداکثر تأخیر مجاز (p95)', ' ms'],
-  ['userKbps', 'bolt', 0, 100, 0.1, () => (ctl.trafficMode === 'steady' ? 'سرعت هر کاربر (۰ = نامحدود)' : 'حداکثر سرعت خط هر کاربر (۰ = نامحدود)'), 'Mbps', 1000],
-  ['minUserPct', 'trend', 10, 100, 5, () => (ctl.trafficMode === 'steady' ? 'حداقل سرعت قابل قبول (درصد از سرعت بالا)' : 'حداقل کیفیت سرعت قابل قبول'), '%'],
+  ['maxP95Ms', 'hourglass', 100, 5000, 50, () => (ctl.trafficMode === 'steady' ? 'حداکثر تأخیر مجاز (p95)' : 'حداکثر زمان پاسخ VPN (p95 یک درخواست کوچک با اتصال تازه)'), ' ms'],
+  ['userKbps', 'bolt', 0, 100, 0.1, () => (ctl.trafficMode === 'steady' ? 'سرعت هر کاربر (۰ = نامحدود)' : 'حداکثر سرعت خط هر کاربر (۰ = واقعی: هر کاربر بین ۴ تا ۳۰ Mbps)'), 'Mbps', 1000],
+  ['minUserPct', 'trend', 10, 100, 5, 'حداقل سرعت قابل قبول (درصد از سرعت بالا)', '%', 1, 'steady'],
+  ['minApdex', 'trend', 50, 99, 1, 'حداقل رضایت کاربران (Apdex)', '%', 1, 'real'],
 ];
 function drawRamp() {
   const n = Math.min(60, Math.ceil((ctl.maxUsers - ctl.startUsers) / ctl.stepUsers) + 1);
   $('#rampPrev').innerHTML = Array.from({ length: Math.max(1, n) }, (_, i) => `<i style="height:${clamp((ctl.startUsers + (i * (ctl.maxUsers - ctl.startUsers)) / Math.max(1, n - 1)) / ctl.maxUsers) * 100}%"></i>`).join('');
 }
 const TM_HINT = {
-  real: 'هر کاربر سرعت خط خودش را دارد (تصادفی تا سقفی که می‌دهید) و مثل آدم واقعی بین کارها جابه‌جا می‌شود: پیام‌رسان، اینستاگرام، وب‌گردی، ویدیو، دانلود — با مکث بین‌شان. معیار شکست: کاربران سرعتی که باید بگیرند را نگیرند یا ویدیو گیر کند.',
+  real: 'هر کاربر یک گوشی است: سرعت خط خودش، ۳ تا ۸ اتصال پس‌زمینه که همیشه باز می‌ماند (پیام‌رسان، نوتیفیکیشن، اپ‌ها)، و کارهایی مثل آدم واقعی — پیام‌رسان، اینستاگرام، وب‌گردی با چند اتصال موازی، ویدیو، دانلود — با مکث بین‌شان. هر کاری که کاربر می‌کند امتیاز می‌گیرد (Apdex). معیار شکست: رضایت کاربران پایین بیاید، VPN کند شود، ویدیو گیر کند، یا RAM / جدول conntrack سرور پر شود. بعد از شکست، پله‌ی قبلی چند دقیقه نگه داشته می‌شود تا ظرفیت تأیید شود. «کاربر» یعنی کاربرِ هم‌زمان آنلاین؛ تعداد اکانتی که می‌شود فروخت معمولاً چند برابر این است.',
   steady: 'هر کاربر یک دانلود بی‌وقفه با دقیقاً همان سرعت است. برای فشار حداکثری روی پهنای باند.',
 };
 function openSetup() {
@@ -643,8 +675,10 @@ function openSetup() {
 }
 function renderSetup() {
   $('#setupBody').innerHTML = `<div class="foot" style="margin-bottom:6px">الگوی ترافیک تست VPN</div><div class="seg tm" id="tmSeg" role="radiogroup">${[['real', 'واقعی (ترکیبی)'], ['steady', 'دانلود پیوسته']].map(([v, l]) => `<button type="button" role="radio" data-v="${v}" aria-checked="${ctl.trafficMode === v}">${l}</button>`).join('')}</div><div class="hint" style="margin:6px 0 14px">${TM_HINT[ctl.trafficMode === 'steady' ? 'steady' : 'real']}</div>` + `<div class="foot" style="margin-bottom:6px">شکل پله‌ها (هر ستون یک پله)</div><div class="ramp" id="rampPrev"></div>` +
-    SLIDERS.map(([k, icn, min, max, step, lbl, unit, scale = 1]) => {
+    SLIDERS.filter((x) => !x[8] || x[8] === (ctl.trafficMode === 'steady' ? 'steady' : 'real')).map(([k, icn, mn, max, step, lbl, unit, scale = 1]) => {
       const label = typeof lbl === 'function' ? lbl() : lbl;
+      const min = typeof mn === 'function' ? mn() : mn;
+      if (ctl[k] / scale < min) ctl[k] = min * scale;
       const v = +(ctl[k] / scale).toFixed(3);
       return `<div class="sl"><div class="sr">${ic(icn)}<span>${label}</span><span class="num"><input type="number" data-k="${k}" data-scale="${scale}" min="${min}" step="${step}" value="${v}" aria-label="${label}"><small>${unit.trim()}</small></span></div><input type="range" data-k="${k}" data-scale="${scale}" min="${min}" max="${max}" step="${step}" value="${Math.min(v, max)}" aria-label="${label}"></div>`;
     }).join('') + '<div class="hint">عددها را می‌توانید مستقیم هم تایپ کنید. تغییرات با زدن «شروع تست» ذخیره می‌شود.</div>';
