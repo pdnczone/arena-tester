@@ -17,7 +17,7 @@ function loadTheme() {
   const g = (n) => cs.getPropertyValue(n).trim();
   TH = { p: [g('--p1'), g('--p2')], ok: g('--ok'), warn: g('--warn'), bad: g('--bad'), idle: g('--idle'), l1: g('--l1'), l2: g('--l2'), l3: g('--l3'), sep: g('--sep'), fill: g('--fill') };
   Chart.defaults.font.size = 12;
-  Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Arabic", system-ui, Tahoma, sans-serif';
+  Chart.defaults.font.family = '"Vazirmatn", system-ui, Tahoma, sans-serif';
   Chart.defaults.color = TH.l2;
 }
 
