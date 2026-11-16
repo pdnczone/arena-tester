@@ -61,7 +61,8 @@ app.use((req, res, next) => {
   }
   res.set('WWW-Authenticate', 'Basic realm="vpn-bench"').status(401).end('auth required');
 });
-app.use(express.static(path.join(__dirname, 'public')));
+// no-cache = the browser revalidates (cheap ETag check) instead of showing an old app.js/style.css after an update
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(400).json({ error: e.message }));
 

@@ -1,6 +1,5 @@
 'use strict';
 // "Servers" dialog: connect a panel, auto-create test users, install the agent with one command.
-const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const lines = (s) => s.split('\n').map((x) => x.trim()).filter(Boolean);
 const fld = (label, name, val, type = 'text', ph = '', secret = true, extra = '') =>
   `<div class="f ${extra}"><label>${label}</label><input name="${name}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}" class="${secret ? 'secret' : ''}" autocomplete="off"></div>`;

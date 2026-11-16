@@ -33,7 +33,14 @@ $DC version >/dev/null 2>&1 || { echo "could not install docker compose; install
 
 command -v git >/dev/null || { apt-get update -y && apt-get install -y git; }
 
-if [ -d "$DIR/.git" ]; then git -C "$DIR" pull --ff-only; else git clone "$REPO" "$DIR"; fi
+if [ -d "$DIR/.git" ]; then
+  # Update = exactly what is on GitHub. Settings (data/) and the password (.env) are untracked, so they are kept.
+  git -C "$DIR" fetch --quiet origin
+  git -C "$DIR" reset --quiet --hard origin/main
+else
+  git clone "$REPO" "$DIR"
+fi
+echo ">> version: $(git -C "$DIR" log -1 --format='%h  %s  (%cr)')"
 cd "$DIR"
 
 if [ ! -f .env ]; then

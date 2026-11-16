@@ -9,6 +9,7 @@ const api = async (url, method = 'GET', body) => {
   return j;
 };
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /* ---------------- theme (tokens come from CSS so light/dark stay in one place) ---------------- */
 let TH = {};
@@ -67,8 +68,13 @@ const P = () => ({ minUserPct: 70, ...ctl, ...(S && S.params ? S.params : {}) })
 const last = (t) => (t.series && t.series.length ? t.series[t.series.length - 1] : null);
 const thrOf = (p) => (p ? (isVpn() ? p.mbps : p.rps) : 0);
 const idxOf = (id) => Math.max(0, Object.keys(S.targets).indexOf(id));
-const tcol = (id) => TH.p[idxOf(id) % 2];
-const cvar = (id) => `var(--p${(idxOf(id) % 2) + 1})`;
+const tcol = (id) => {
+  const t = S && S.targets[id];
+  const c = (t && t.color) || (cfg && (cfg.targets.find((x) => x.id === id) || {}).color);
+  return /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : TH.p[idxOf(id) % 2];
+};
+const cvar = (id) => tcol(id);
+const initial = (name) => esc(String(name || '?').trim().charAt(0).toUpperCase());
 const lvColor = (lv) => TH[lv] || TH.idle;
 
 /* ---------------- toolbar ---------------- */
@@ -168,10 +174,10 @@ function handle(m) {
 function onEvent(ev) {
   if (ev.kind === 'break') {
     const t = S.targets[ev.id];
-    toast('break', 'xoct', `<b>${t.name}</b> در ${fmt(ev.users)} کاربر از کار افتاد`);
-  } else if (ev.kind === 'warn') toast('warn', 'alert', ev.text);
-  else if (ev.kind === 'error') toast('error', 'alert', ev.text);
-  else if (ev.kind === 'ok') toast('ok', 'check', ev.text);
+    toast('break', 'xoct', `<b>${esc(t.name)}</b> در ${fmt(ev.users)} کاربر از کار افتاد`);
+  } else if (ev.kind === 'warn') toast('warn', 'alert', esc(ev.text));
+  else if (ev.kind === 'error') toast('error', 'alert', esc(ev.text));
+  else if (ev.kind === 'ok') toast('ok', 'check', esc(ev.text));
 }
 function toast(kind, icon, html) {
   const el = document.createElement('div');
@@ -215,6 +221,7 @@ function paintTop() {
   const b = $('#startBtn');
   b.innerHTML = ic(run ? 'stop' : 'play') + `<span>${run ? 'توقف' : 'شروع تست'}</span>`;
   b.setAttribute('aria-label', run ? 'توقف تست' : 'شروع تست');
+  b.classList.toggle('running', run);
   document.body.classList.toggle('locked', run);
   $('#settingsBtn').disabled = run;
   $('#setupBtn').disabled = run;
@@ -236,13 +243,17 @@ setInterval(() => { if (S && isRunning()) paintTop(); }, 1000);
 function paintBanners() {
   if (!S) return;
   const out = [];
-  if (cfg && !cfg.targets.some((t) => t.panelUrl || t._has.links || t._has.subs)) out.push(['', 'برای شروع روی «سرورها» بزنید و آدرس و ورود هر پنل را بدهید؛ ساخت کاربران تست و نصب ایجنت از همان‌جا خودکار انجام می‌شود.']);
+  const empty = cfg && !cfg.targets.some((t) => t.panelUrl || t._has.agent || t._has.links || t._has.subs);
+  document.body.classList.toggle('empty', !!empty);
   if (S.warnings && S.warnings.includes('gen')) out.push(['', 'CPU یا کارت شبکه‌ی سرور سوم (مولد بار) بالای ۸۵٪ رفته؛ نتیجه محدودیت خود سرور سوم است، نه پنل‌ها.']);
   const protos = Object.values(S.targets).map((t) => t.protocol).filter(Boolean);
   if (S.type === 'vpn' && new Set(protos).size > 1) out.push(['', 'پروتکل/ترنسپورت دو پنل یکی نیست (' + protos.join(' ≠ ') + ')؛ مقایسه عادلانه نیست.']);
   for (const e of S.events.filter((x) => x.kind === 'error')) out.push(['err', e.text]);
-  $('#banners').innerHTML = out.map(([c, t]) => `<div class="banner ${c}">${ic('alert')}<span>${t}</span></div>`).join('');
+  const hero = empty ? `<div class="hero"><div class="hero-ic">${ic('server')}</div><div class="hero-tx"><h2>اولین سرور را اضافه کنید</h2><p>روی «افزودن سرور» بزنید، دستور را کپی کنید و روی سرور پنل اجرا کنید. ایجنت نصب می‌شود و سرور خودش همین‌جا ظاهر می‌شود.</p></div><button type="button" class="cta" data-open="servers">${ic('server')}<span>افزودن سرور</span></button></div>` : '';
+  $('#banners').innerHTML = hero + out.map(([c, t]) => `<div class="banner ${c}">${ic('alert')}<span>${esc(t)}</span></div>`).join('');
 }
+
+$('#banners').addEventListener('click', (e) => { if (e.target.closest('[data-open=servers]')) $('#settingsBtn').click(); });
 
 /* ---------------- race ---------------- */
 function buildRace() {
@@ -256,7 +267,7 @@ function buildRace() {
     const el = document.createElement('div');
     el.className = 'lane idle';
     el.style.setProperty('--c', cvar(t.id));
-    el.innerHTML = `<div class="who"><i></i><span>${t.name}</span></div><div class="track"><div class="fill"></div><div class="segs"></div></div><div class="val"><span class="tab">0</span><small>کاربر</small></div>`;
+    el.innerHTML = `<div class="who"><span class="avatar sm">${initial(t.name)}</span><span>${esc(t.name)}</span></div><div class="track"><div class="fill"></div><div class="segs"></div></div><div class="val"><span class="tab">0</span><small>کاربر</small></div>`;
     $('#lanes', box).appendChild(el);
     lanes[t.id] = { el, track: $('.track', el), fill: $('.fill', el), segs: $('.segs', el), val: $('.val .tab', el) };
   });
@@ -273,7 +284,7 @@ function paintRace() {
     const u = p ? p.users : 0;
     l.fill.style.width = pct(u) + '%';
     l.val.textContent = fmt(u);
-    l.el.classList.toggle('idle', t.status === 'waiting');
+    l.el.classList.toggle('idle', isRunning() && t.status === 'waiting');
     l.el.classList.toggle('loser', !!S.winner && S.winner !== t.id && S.winner !== 'tie');
     let prev = 0;
     l.segs.innerHTML = t.steps.map((s) => { const w = pct(s.users - prev); prev = s.users; return `<i class="${s.ok ? 'ok' : 'fail'}" style="width:calc(${w}% - 1px)"></i>`; }).join('');
@@ -352,6 +363,7 @@ function frame(now) {
 /* ---------------- target cards ---------------- */
 const KEYS = (id) => `<span><i style="background:${cvar(id)}"></i>تأخیر</span><span><i style="background:var(--bad)"></i>خطا</span><span><i style="background:var(--l2)"></i>CPU سرور</span><span><i style="background:var(--l3)"></i>کاربر</span><span><i style="background:transparent;border-top:2px dashed var(--l3);height:0"></i>حد مجاز</span>`;
 
+const KIND_NAME = { '3xui': '3x-ui', nexora: 'Nexora', custom: 'پنل دستی' };
 function buildCard(t) {
   const el = document.createElement('div');
   el.className = 'tcard';
@@ -359,7 +371,7 @@ function buildCard(t) {
   el.setAttribute('aria-label', t.name);
   el.style.setProperty('--c', cvar(t.id));
   el.innerHTML = `
-    <div class="chead"><i class="dot"></i><h2>${t.name}</h2><span class="proto"></span><span class="pill" role="status"></span></div>
+    <div class="chead"><span class="avatar">${initial(t.name)}</span><div class="ctitle"><h2>${esc(t.name)}</h2><span class="ckind">${esc(KIND_NAME[t.kind] || '')}</span></div><span class="proto"></span><span class="pill" role="status"></span></div>
     <div class="kpis">
       <div class="kpi"><span class="big" id="users">0</span><span class="lbl">${ic('users')}<span id="ulbl"></span></span></div>
       <div class="kpi"><span class="mid" id="thr">0</span><span class="lbl">${ic('activity')}<span id="tlbl"></span></span></div>
@@ -373,7 +385,7 @@ function buildCard(t) {
       <div class="sbar" data-k="ram"><span>RAM</span><div class="tr"><i class="p"></i><i class="k"></i><i class="o"></i></div></div>
       <div class="fcap legend"><span><i style="background:var(--c)"></i>پروسه‌ی پنل <b class="tab" id="lp"></b></span><span><i style="background:var(--l1)"></i>هسته (Xray) <b class="tab" id="lk"></b></span><span><i style="background:var(--l3)"></i>سایر</span></div>
     </div>
-    <div class="pulse"><div class="ph"><b>فشار نسبت به حد مجاز</b><div class="keys">${KEYS(t.id)}</div></div><div class="cv"><canvas role="img" aria-label="نمودار فشار ${t.name} نسبت به حد مجاز"></canvas></div></div>
+    <div class="pulse"><div class="ph"><b>فشار نسبت به حد مجاز</b><div class="keys">${KEYS(t.id)}</div></div><div class="cv"><canvas role="img" aria-label="نمودار فشار ${esc(t.name)} نسبت به حد مجاز"></canvas></div></div>
     <div class="errs"></div>`;
   $('#arena').appendChild(el);
   const col = tcol(t.id);
@@ -423,7 +435,7 @@ function paintCard(id) {
   pill.style.setProperty('--s', lvColor(h));
   pill.innerHTML = ic(pi) + `<span>${pt}</span>`;
   el.classList.toggle('bad', h === 'bad');
-  el.style.opacity = t.status === 'waiting' ? 0.6 : 1;
+  el.style.opacity = isRunning() && t.status === 'waiting' ? 0.6 : 1;
   $('.proto', el).textContent = t.protocol || '';
   $('.proto', el).style.display = t.protocol ? '' : 'none';
   $('#users', el).textContent = fmt(p.users ?? t.users ?? 0);
@@ -486,7 +498,7 @@ function mkCmp(id, key) {
   cmp[key] = new Chart($(id), {
     type: 'line', data: { datasets: [] },
     options: { parsing: false, animation: false, responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: { color: TH.l2, usePointStyle: true, boxWidth: 8, font: { size: 12 } } } },
+      plugins: { legend: { position: 'bottom', rtl: true, textDirection: 'rtl', labels: { color: TH.l2, usePointStyle: true, boxWidth: 8, padding: 16, font: { size: 13 } } } },
       elements: { point: { radius: 3.5 }, line: { borderWidth: 2.5, tension: 0.2 } },
       scales: {
         x: { type: 'linear', ticks: { color: TH.l2, maxTicksLimit: 8 }, grid: { color: TH.sep }, title: { display: true, text: 'تعداد کاربر', color: TH.l2 } },
@@ -518,7 +530,7 @@ const PEAKS = [
   { k: 'peakTcp', icon: 'link', title: 'بیشترین اتصال TCP', unit: '' },
 ];
 function buildPeaks() {
-  $('#peaks').innerHTML = PEAKS.map((r) => `<div class="peak" data-k="${r.k}"><h3>${ic(r.icon)}${typeof r.title === 'function' ? r.title() : r.title}</h3>${Object.values(S.targets).map((t) => `<div class="prow" data-id="${t.id}"><span class="pn"><i style="background:${cvar(t.id)}"></i>${t.name}</span><div class="pbar"><i style="background:${cvar(t.id)}"></i></div><span class="pv">—</span></div>`).join('')}</div>`).join('');
+  $('#peaks').innerHTML = PEAKS.map((r) => `<div class="peak" data-k="${r.k}"><h3>${ic(r.icon)}${typeof r.title === 'function' ? r.title() : r.title}</h3>${Object.values(S.targets).map((t) => `<div class="prow" data-id="${t.id}"><span class="pn"><i style="background:${cvar(t.id)}"></i>${esc(t.name)}</span><div class="pbar"><i style="background:${cvar(t.id)}"></i></div><span class="pv">—</span></div>`).join('')}</div>`).join('');
 }
 function paintPeaks() {
   const T = Object.values(S.targets).filter((t) => t.result);
