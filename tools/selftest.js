@@ -36,7 +36,7 @@ check('breachReason uses real active, not requested users', () => {
   const r = new Runner({ get() { return { test: {}, targets: [], generator: {} }; } });
   r.p = { type: 'vpn', userKbps: 2000, minUserPct: 70, maxErrPct: 2, maxP95Ms: 1500 };
   assert.equal(r.breachReason({ active: 5, userKbps: 0, errPct: 0, p95: 0, rps: 0 }), null);
-  assert.match(r.breachReason({ active: 50, userKbps: 100, errPct: 0, p95: 0, rps: 0 }), /per-user speed/);
+  assert.match(r.breachReason({ active: 50, userKbps: 100, errPct: 0, p95: 0, rps: 0 }), /سرعت هر کاربر/);
   assert.equal(r.breachReason({ active: 50, userKbps: 1800, errPct: 0, p95: 0, rps: 0 }), null);
 });
 
