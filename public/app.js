@@ -57,7 +57,8 @@ const ic = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 let cfg = null;
 let S = null;
 let ui = { type: 'panel', mode: 'parallel' };
-let ctl = { startUsers: 50, stepUsers: 50, stepSeconds: 15, maxUsers: 2000, maxErrPct: 2, maxP95Ms: 1500, userKbps: 2000 };
+let ctl = { startUsers: 50, stepUsers: 50, stepSeconds: 15, maxUsers: 2000, maxErrPct: 2, maxP95Ms: 1500, userKbps: 2000, minUserPct: 70, trafficMode: 'real' };
+const realTraffic = () => (S && S.params && isRunning() ? S.params.trafficMode : ctl.trafficMode) !== 'steady';
 const cards = {};
 const lanes = {};
 const cmp = {};
@@ -476,8 +477,15 @@ function paintCard(id) {
   $('.gl', thrG).textContent = vpn ? 'پهنای باند' : 'درخواست/ثانیه';
   setGauge(el, 'thr', thr / Math.max(thrRef, 1), p.p95 == null ? 'idle' : 'neutral', p.p95 == null ? '—' : vpn ? fmt(thr, 1) + ' Mbps' : fmt(thr) + ' rps');
   const sg = $('.g[data-k=spd]', el);
-  sg.style.display = vpn && X.userKbps > 0 ? '' : 'none';
-  if (vpn && X.userKbps > 0) {
+  if (vpn && realTraffic()) {
+    sg.style.display = '';
+    $('.gl', sg).textContent = 'کیفیت سرعت';
+    const q = p.qualityPct;
+    const enough = q != null && p.qN >= 5;
+    setGauge(el, 'spd', enough ? q / 100 : 0, enough ? (q < X.minUserPct ? 'bad' : q < X.minUserPct + 15 ? 'warn' : 'ok') : 'idle', enough ? q + '%' : '—');
+  } else sg.style.display = vpn && X.userKbps > 0 ? '' : 'none';
+  if (vpn && !realTraffic() && X.userKbps > 0) {
+    $('.gl', sg).textContent = 'سرعت هر کاربر';
     const need = (X.userKbps * X.minUserPct) / 100;
     const enough = p.active >= 10;
     setGauge(el, 'spd', (p.userKbps || 0) / X.userKbps, enough ? (p.userKbps < need ? 'bad' : p.userKbps < X.userKbps * 0.9 ? 'warn' : 'ok') : 'idle', enough ? fmt(p.userKbps) + ' kbps' : '—');
@@ -608,15 +616,25 @@ const SLIDERS = [
   ['maxUsers', 'flag', 100, 20000, 100, 'سقف کاربر', ''],
   ['maxErrPct', 'alert', 0.5, 20, 0.5, 'حداکثر خطای مجاز', '%'],
   ['maxP95Ms', 'hourglass', 100, 5000, 50, 'حداکثر تأخیر مجاز (p95)', ' ms'],
-  ['userKbps', 'bolt', 0, 100, 0.1, 'سرعت هر کاربر در تست VPN (۰ = نامحدود)', 'Mbps', 1000],
+  ['userKbps', 'bolt', 0, 100, 0.1, () => (ctl.trafficMode === 'steady' ? 'سرعت هر کاربر (۰ = نامحدود)' : 'حداکثر سرعت خط هر کاربر (۰ = نامحدود)'), 'Mbps', 1000],
+  ['minUserPct', 'trend', 10, 100, 5, () => (ctl.trafficMode === 'steady' ? 'حداقل سرعت قابل قبول (درصد از سرعت بالا)' : 'حداقل کیفیت سرعت قابل قبول'), '%'],
 ];
 function drawRamp() {
   const n = Math.min(60, Math.ceil((ctl.maxUsers - ctl.startUsers) / ctl.stepUsers) + 1);
   $('#rampPrev').innerHTML = Array.from({ length: Math.max(1, n) }, (_, i) => `<i style="height:${clamp((ctl.startUsers + (i * (ctl.maxUsers - ctl.startUsers)) / Math.max(1, n - 1)) / ctl.maxUsers) * 100}%"></i>`).join('');
 }
+const TM_HINT = {
+  real: 'هر کاربر سرعت خط خودش را دارد (تصادفی تا سقفی که می‌دهید) و مثل آدم واقعی بین کارها جابه‌جا می‌شود: پیام‌رسان، اینستاگرام، وب‌گردی، ویدیو، دانلود — با مکث بین‌شان. معیار شکست: کاربران سرعتی که باید بگیرند را نگیرند یا ویدیو گیر کند.',
+  steady: 'هر کاربر یک دانلود بی‌وقفه با دقیقاً همان سرعت است. برای فشار حداکثری روی پهنای باند.',
+};
 function openSetup() {
-  $('#setupBody').innerHTML = `<div class="foot" style="margin-bottom:6px">شکل پله‌ها (هر ستون یک پله)</div><div class="ramp" id="rampPrev"></div>` +
-    SLIDERS.map(([k, icn, min, max, step, label, unit, scale = 1]) => {
+  renderSetup();
+  $('#setup').showModal();
+}
+function renderSetup() {
+  $('#setupBody').innerHTML = `<div class="foot" style="margin-bottom:6px">الگوی ترافیک تست VPN</div><div class="seg tm" id="tmSeg" role="radiogroup">${[['real', 'واقعی (ترکیبی)'], ['steady', 'دانلود پیوسته']].map(([v, l]) => `<button type="button" role="radio" data-v="${v}" aria-checked="${ctl.trafficMode === v}">${l}</button>`).join('')}</div><div class="hint" style="margin:6px 0 14px">${TM_HINT[ctl.trafficMode === 'steady' ? 'steady' : 'real']}</div>` + `<div class="foot" style="margin-bottom:6px">شکل پله‌ها (هر ستون یک پله)</div><div class="ramp" id="rampPrev"></div>` +
+    SLIDERS.map(([k, icn, min, max, step, lbl, unit, scale = 1]) => {
+      const label = typeof lbl === 'function' ? lbl() : lbl;
       const v = +(ctl[k] / scale).toFixed(3);
       return `<div class="sl"><div class="sr">${ic(icn)}<span>${label}</span><span class="num"><input type="number" data-k="${k}" data-scale="${scale}" min="${min}" step="${step}" value="${v}" aria-label="${label}"><small>${unit.trim()}</small></span></div><input type="range" data-k="${k}" data-scale="${scale}" min="${min}" max="${max}" step="${step}" value="${Math.min(v, max)}" aria-label="${label}"></div>`;
     }).join('') + '<div class="hint">عددها را می‌توانید مستقیم هم تایپ کنید. تغییرات با زدن «شروع تست» ذخیره می‌شود.</div>';
@@ -634,7 +652,12 @@ function openSetup() {
     rng.oninput = () => set(rng.value, rng);
     num.oninput = () => set(num.value, num);
   });
-  $('#setup').showModal();
+  $('#tmSeg').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    ctl.trafficMode = b.dataset.v;
+    renderSetup();
+  };
 }
 $('#setupBtn').onclick = openSetup;
 $('#setupClose').onclick = () => $('#setup').close();

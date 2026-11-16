@@ -393,3 +393,6 @@ body.has-runbar #toasts { bottom: 92px; }
 .sl .sr .num small { color: var(--l2); font-size: 12px; min-width: 32px; }
 #setup .hint { margin-top: 6px; }
 @media (max-width: 760px) { #runbar { left: 12px; right: 12px; transform: none; justify-content: space-between; padding-inline-start: 14px; } #runbar #runClock { display: none; } }
+
+#setup .seg.tm { display: flex; width: 100%; }
+#setup .seg.tm button { flex: 1; justify-content: center; }
