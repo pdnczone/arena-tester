@@ -132,7 +132,7 @@ function connect() {
 function handle(m) {
   if (m.type === 'snapshot') {
     S = m.state;
-    if (S.params) Object.keys(ctl).forEach((k) => { if (S.params[k] != null) ctl[k] = S.params[k]; });
+    if (S.params && isRunning()) Object.keys(ctl).forEach((k) => { if (S.params[k] != null) ctl[k] = S.params[k]; });
     if (S.type) { ui.type = S.type; ui.mode = S.mode; }
     applyType();
     rebuild();
@@ -219,10 +219,18 @@ function stableUsers(t) {
 function paintTop() {
   if (!S) return;
   const run = isRunning();
-  const b = $('#startBtn');
-  b.innerHTML = ic(run ? 'stop' : 'play') + `<span>${run ? 'توقف' : 'شروع تست'}</span>`;
-  b.setAttribute('aria-label', run ? 'توقف تست' : 'شروع تست');
-  b.classList.toggle('running', run);
+  const stopping = S.status === 'stopping';
+  const label = stopping ? 'در حال توقف…' : run ? 'توقف تست' : 'شروع تست';
+  for (const b of [$('#startBtn'), $('#runStop')]) {
+    b.innerHTML = ic(run ? 'stop' : 'play') + `<span>${label}</span>`;
+    b.setAttribute('aria-label', label);
+    b.classList.toggle('running', run);
+    b.disabled = stopping;
+  }
+  const preparing = Object.values(S.targets).some((t) => t.status === 'preparing');
+  $('#runbar').hidden = !run;
+  document.body.classList.toggle('has-runbar', run);
+  $('#runText').textContent = stopping ? 'در حال توقف تست…' : preparing ? 'در حال ساخت کاربران و کانفیگ‌های تست…' : S.status === 'cooldown' ? 'استراحت بین دو سرور…' : 'تست در حال اجراست';
   document.body.classList.toggle('locked', run);
   $('#settingsBtn').disabled = run;
   $('#setupBtn').disabled = run;
@@ -238,6 +246,7 @@ function paintTop() {
   $('.progress').setAttribute('aria-valuenow', Math.round(prog * 100));
   const secs = S.startedAt ? Math.floor(((run ? Date.now() : S.lastTickAt || Date.now()) - S.startedAt) / 1000) : 0;
   $('#clock').textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+  $('#runClock').textContent = $('#clock').textContent;
 }
 setInterval(() => { if (S && isRunning()) paintTop(); }, 1000);
 
@@ -576,9 +585,15 @@ function rebuild() {
 }
 
 /* ---------------- start / stop ---------------- */
+const stopTest = async () => {
+  S.status = 'stopping';
+  paintTop();
+  try { await api('/api/stop', 'POST'); } catch (e) { toast('error', 'alert', e.message); }
+};
+$('#runStop').onclick = stopTest;
 $('#startBtn').onclick = async () => {
   try {
-    if (isRunning()) return await api('/api/stop', 'POST');
+    if (isRunning()) return await stopTest();
     const t = { type: ui.type, mode: ui.mode, ...ctl };
     await api('/api/config', 'PUT', { test: t });
     await api('/api/start', 'POST', t);
@@ -593,7 +608,7 @@ const SLIDERS = [
   ['maxUsers', 'flag', 100, 20000, 100, 'سقف کاربر', ''],
   ['maxErrPct', 'alert', 0.5, 20, 0.5, 'حداکثر خطای مجاز', '%'],
   ['maxP95Ms', 'hourglass', 100, 5000, 50, 'حداکثر تأخیر مجاز (p95)', ' ms'],
-  ['userKbps', 'bolt', 0, 10000, 64, 'سرعت هر کاربر در تست VPN (۰ = نامحدود)', ' kbps'],
+  ['userKbps', 'bolt', 0, 100, 0.1, 'سرعت هر کاربر در تست VPN (۰ = نامحدود)', 'Mbps', 1000],
 ];
 function drawRamp() {
   const n = Math.min(60, Math.ceil((ctl.maxUsers - ctl.startUsers) / ctl.stepUsers) + 1);
@@ -601,10 +616,23 @@ function drawRamp() {
 }
 function openSetup() {
   $('#setupBody').innerHTML = `<div class="foot" style="margin-bottom:6px">شکل پله‌ها (هر ستون یک پله)</div><div class="ramp" id="rampPrev"></div>` +
-    SLIDERS.map(([k, icn, min, max, step, label, unit]) => `<div class="sl"><div class="sr">${ic(icn)}<span>${label}</span><output data-u="${unit}">${ctl[k]}${unit}</output></div><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${ctl[k]}" aria-label="${label}"></div>`).join('');
+    SLIDERS.map(([k, icn, min, max, step, label, unit, scale = 1]) => {
+      const v = +(ctl[k] / scale).toFixed(3);
+      return `<div class="sl"><div class="sr">${ic(icn)}<span>${label}</span><span class="num"><input type="number" data-k="${k}" data-scale="${scale}" min="${min}" step="${step}" value="${v}" aria-label="${label}"><small>${unit.trim()}</small></span></div><input type="range" data-k="${k}" data-scale="${scale}" min="${min}" max="${max}" step="${step}" value="${Math.min(v, max)}" aria-label="${label}"></div>`;
+    }).join('') + '<div class="hint">عددها را می‌توانید مستقیم هم تایپ کنید. تغییرات با زدن «شروع تست» ذخیره می‌شود.</div>';
   drawRamp();
-  $$('#setupBody input[type=range]').forEach((r) => {
-    r.oninput = () => { ctl[r.dataset.k] = Number(r.value); const o = r.previousElementSibling.querySelector('output'); o.textContent = r.value + o.dataset.u; drawRamp(); };
+  $$('#setupBody .sl').forEach((row) => {
+    const num = $('input[type=number]', row);
+    const rng = $('input[type=range]', row);
+    const set = (val, from) => {
+      const v = Math.max(Number(num.min) || 0, Number(val) || 0);
+      ctl[num.dataset.k] = Math.round(v * Number(num.dataset.scale) * 1000) / 1000;
+      if (from !== num) num.value = v;
+      if (from !== rng) rng.value = Math.min(v, Number(rng.max));
+      drawRamp();
+    };
+    rng.oninput = () => set(rng.value, rng);
+    num.oninput = () => set(num.value, num);
   });
   $('#setup').showModal();
 }

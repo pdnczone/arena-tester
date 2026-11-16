@@ -375,3 +375,21 @@ button.primary { color: #fff; background: linear-gradient(135deg, var(--tint), v
   .chead .pill { margin-inline-start: 0; }
 }
 @media (max-width: 760px) { .toolbar { position: static; } }
+
+/* floating run bar: the stop button is always reachable, whatever the scroll position or screen size */
+#runbar { position: fixed; z-index: 15; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 8px 8px 8px 18px; border-radius: 999px; background: color-mix(in srgb, var(--card) 86%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 10px 40px rgba(0, 0, 0, .28), 0 0 0 1px var(--sep); font-size: 14px; font-weight: 600; white-space: nowrap; max-width: calc(100vw - 24px); }
+#runbar[hidden] { display: none; }
+#runbar .live { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); animation: live 1.6s infinite; flex: none; }
+#runbar #runText { overflow: hidden; text-overflow: ellipsis; }
+#runbar #runClock { color: var(--l2); font-weight: 500; }
+#runbar .start { height: 40px; padding: 0 20px; }
+.start:disabled { opacity: .6; cursor: progress; }
+@keyframes live { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--bad) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 8px transparent; } }
+body.has-runbar main { padding-bottom: 120px; }
+body.has-runbar #toasts { bottom: 92px; }
+/* setup: slider + typed value */
+.sl .sr .num { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 6px; }
+.sl .sr .num input { width: 96px; min-height: 32px; padding: 4px 10px; text-align: center; direction: ltr; font-variant-numeric: tabular-nums; background: var(--card2); box-shadow: var(--ring); }
+.sl .sr .num small { color: var(--l2); font-size: 12px; min-width: 32px; }
+#setup .hint { margin-top: 6px; }
+@media (max-width: 760px) { #runbar { left: 12px; right: 12px; transform: none; justify-content: space-between; padding-inline-start: 14px; } #runbar #runClock { display: none; } }
