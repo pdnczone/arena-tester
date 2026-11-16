@@ -30,7 +30,7 @@ function targetFieldset(t) {
     <div class="step only-api"><b>۲</b> کاربران تست (خودکار از طریق API پنل)</div>
     <div class="row only-api">
       ${fld('تعداد کاربر تست', 'count', (pv && pv.count) || 200, 'number', '', false)}
-      <div class="f only-3xui"><label>پروتکل</label><select name="protocol">${[['vless', 'VLESS + TCP'], ['vmess', 'VMess + TCP'], ['trojan', 'Trojan + TCP'], ['shadowsocks', 'Shadowsocks']].map(([k, v]) => `<option value="${k}" ${pv && pv.protocol === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="f only-3xui"><label>پروتکل</label><select name="protocol">${[['reality', 'VLESS + REALITY (پیشنهادی، مثل کاربر واقعی)'], ['vless', 'VLESS + TCP بدون TLS (فقط IP خصوصی)'], ['vmess', 'VMess + TCP'], ['trojan', 'Trojan + TCP'], ['shadowsocks', 'Shadowsocks']].map(([k, v]) => `<option value="${k}" ${pv && pv.protocol === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
       ${fld('پورت اینباند تست', 'port', (pv && pv.port) || 24443, 'number', '', false, 'only-3xui')}
     </div>
     <div class="btns only-api">
