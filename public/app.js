@@ -92,6 +92,7 @@ function initStatic() {
 }
 const enabledTargets = () => (cfg ? cfg.targets.filter((t) => t.enabled !== false) : []);
 function applyType() {
+  ui.type = 'vpn';
   const solo = enabledTargets().length < 2;
   document.body.classList.toggle('solo', solo);
   if (solo) ui.mode = 'parallel';
@@ -325,6 +326,7 @@ const GAUGES = [
   { k: 'err', icon: 'alert', label: 'خطا', limit: true },
   { k: 'thr', icon: 'activity', label: '' },
   { k: 'spd', icon: 'bolt', label: 'سرعت هر کاربر', vpn: true },
+  { k: 'db', icon: 'server', label: 'ساخت کاربر روی پنل' },
 ];
 const gaugeHtml = (g) => `<div class="g c-none" data-k="${g.k}"><div class="ring"><svg class="r" viewBox="0 0 64 64" aria-hidden="true"><circle class="bgr" cx="32" cy="32" r="26"/><circle class="fgr" cx="32" cy="32" r="26"/>${g.limit ? '<line class="tk" x1="53.7" y1="28.6" x2="61.6" y2="27.3"/>' : ''}</svg><span class="gi">${ic(g.icon)}</span></div><div class="gv"><span class="gx"></span><span class="gt">—</span></div><div class="gl">${g.label}</div></div>`;
 function setGauge(card, k, frac, level, text) {
@@ -450,7 +452,7 @@ function paintCard(id) {
   $('.proto', el).textContent = t.protocol || '';
   $('.proto', el).style.display = t.protocol ? '' : 'none';
   $('#users', el).textContent = fmt(p.users ?? t.users ?? 0);
-  $('#ulbl', el).textContent = vpn ? 'کاربر متصل (همزمان)' : 'کاربر مجازی';
+  $('#ulbl', el).textContent = vpn ? (p.created != null ? `کاربر آنلاین · ${fmt(p.active || 0)} وصل · ${fmt(p.created)} ساخته‌شده روی پنل` : 'کاربر متصل (همزمان)') : 'کاربر مجازی';
   const thr = thrOf(p);
   $('#thr', el).textContent = vpn ? fmt(thr, 1) : fmt(thr);
   $('#tlbl', el).textContent = vpn ? 'Mbps پهنای باند' : 'درخواست در ثانیه';
@@ -476,6 +478,14 @@ function paintCard(id) {
   const thrG = $('.g[data-k=thr]', el);
   $('.gl', thrG).textContent = vpn ? 'پهنای باند' : 'درخواست/ثانیه';
   setGauge(el, 'thr', thr / Math.max(thrRef, 1), p.p95 == null ? 'idle' : 'neutral', p.p95 == null ? '—' : vpn ? fmt(thr, 1) + ' Mbps' : fmt(thr) + ' rps');
+  // the panel's database: how long creating one user takes (p95), and whether it fails
+  const dg = $('.g[data-k=db]', el);
+  dg.style.display = p.created != null || t.status === 'preparing' ? '' : 'none';
+  if (p.created != null) {
+    const ms = p.dbP95;
+    const lv = p.dbFailPct > 20 ? 'bad' : p.dbFailPct > 0 || ms > 1000 ? 'warn' : 'ok';
+    setGauge(el, 'db', ms != null ? clamp(ms / 1500) : 0, ms == null && !p.dbFail ? 'idle' : lv, ms != null ? fmt(ms) + ' ms' : p.dbFail ? `${fmt(p.dbFail)} خطا` : '—');
+  }
   const sg = $('.g[data-k=spd]', el);
   if (vpn && realTraffic()) {
     sg.style.display = '';

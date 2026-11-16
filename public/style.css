@@ -396,3 +396,6 @@ body.has-runbar #toasts { bottom: 92px; }
 
 #setup .seg.tm { display: flex; width: 100%; }
 #setup .seg.tm button { flex: 1; justify-content: center; }
+
+/* one test (VPN / Xray): the old panel-only HTTP test switch is gone */
+#typeSeg { display: none; }
