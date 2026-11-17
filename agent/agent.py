@@ -68,9 +68,31 @@ def read_sockstat():
     return out
 
 
+def link_mbps():
+    """Speed of the interface that carries the default route, when the driver reports one (virtio often does not)."""
+    try:
+        with open("/proc/net/route") as fh:
+            for line in list(fh)[1:]:
+                c = line.split()
+                if c[1] == "00000000":
+                    with open(f"/sys/class/net/{c[0]}/speed") as sf:
+                        v = int(sf.read().strip())
+                    return v if v > 0 else None
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 def read_limits():
-    """conntrack table use (a full table silently drops new connections), OOM kills so far, swap in use."""
-    out = {"ct": None, "ctMax": None, "oom": None, "swapMB": None}
+    """conntrack table use (a full table silently drops new connections), OOM kills so far, swap in use,
+    and the local port range (every outgoing connection to one destination needs its own port)."""
+    out = {"ct": None, "ctMax": None, "oom": None, "swapMB": None, "portRange": None, "linkMbps": LINK}
+    try:
+        with open("/proc/sys/net/ipv4/ip_local_port_range") as fh:
+            lo, hi = (int(x) for x in fh.read().split())
+            out["portRange"] = hi - lo + 1
+    except (OSError, ValueError):
+        pass
     for k, f in (("ct", "/proc/sys/net/netfilter/nf_conntrack_count"), ("ctMax", "/proc/sys/net/netfilter/nf_conntrack_max")):
         try:
             with open(f) as fh:
@@ -96,9 +118,23 @@ def read_limits():
     return out
 
 
+def fd_info(pid):
+    """(open files, soft limit) of one process: running out of file descriptors refuses new connections."""
+    try:
+        n = len(os.listdir(f"/proc/{pid}/fd"))
+        with open(f"/proc/{pid}/limits") as fh:
+            for line in fh:
+                if line.startswith("Max open files"):
+                    v = line.split()[3]
+                    return n, int(v) if v.isdigit() else 0
+        return n, 0
+    except (OSError, ValueError, IndexError):
+        return 0, 0
+
+
 def scan_procs(names):
-    """Return {name: (cpu_ticks, rss_kb)} summed over processes whose comm/cmdline matches."""
-    res = {n: [0, 0, 0] for n in names}
+    """Return {name: [cpu_ticks, rss_kb, start, fds, fd_limit]} summed over processes whose comm/cmdline matches."""
+    res = {n: [0, 0, 0, 0, 0] for n in names}
     page_kb = os.sysconf("SC_PAGE_SIZE") // 1024
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
@@ -116,10 +152,15 @@ def scan_procs(names):
                 with open(f"/proc/{pid}/cmdline", "rb") as f:
                     cmd = f.read().replace(b"\0", b" ").decode(errors="ignore").lower()
                 hit = [n for n in names if n in cmd.split(" ")[0]]
+            if hit:
+                fds, lim = fd_info(pid)
             for n in hit:
                 res[n][0] += ticks
                 res[n][1] += rss
                 res[n][2] = max(res[n][2], start)
+                res[n][3] = max(res[n][3], fds)
+                if lim and (not res[n][4] or lim < res[n][4]):
+                    res[n][4] = lim
         except (OSError, ValueError, IndexError):
             continue
     return res
@@ -142,12 +183,12 @@ def sampler():
             names = [n for n, ts in tracked.items() if now - ts < 60]
         procs = scan_procs(names) if names else {}
         pout = {}
-        for n, (ticks, rss, start) in procs.items():
+        for n, (ticks, rss, start, fds, fdmax) in procs.items():
             prev = pprocs.get(n)
             cpu = 0.0
             if prev is not None and ticks >= prev:
                 cpu = (ticks - prev) / CLK / dt * 100  # % of ONE core
-            pout[n] = {"cpu": round(cpu, 1), "rssMB": round(rss / 1024, 1), "start": start}
+            pout[n] = {"cpu": round(cpu, 1), "rssMB": round(rss / 1024, 1), "start": start, "fds": fds, "fdMax": fdmax or None}
         pprocs = {n: v[0] for n, v in procs.items()}
         la = os.getloadavg()[0]
         snap = {
@@ -204,7 +245,10 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+LINK = None
+
 if __name__ == "__main__":
+    LINK = link_mbps()
     threading.Thread(target=sampler, daemon=True).start()
     print(f"vpn-bench agent on :{PORT} (token {'set' if TOKEN else 'NOT set'})")
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

@@ -57,7 +57,7 @@ const ic = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[
 let cfg = null;
 let S = null;
 let ui = { type: 'panel', mode: 'parallel' };
-let ctl = { startUsers: 25, stepUsers: 25, stepSeconds: 60, maxUsers: 2000, maxErrPct: 2, maxP95Ms: 1500, userKbps: 0, minUserPct: 70, minApdex: 85, trafficMode: 'real' };
+let ctl = { startUsers: 25, stepUsers: 25, stepSeconds: 60, maxUsers: 2000, maxErrPct: 2, maxP95Ms: 1500, userKbps: 0, minUserPct: 70, minApdex: 85, connsPerUser: 100, trafficMode: 'real' };
 const realTraffic = () => (S && S.params && isRunning() ? S.params.trafficMode : ctl.trafficMode) !== 'steady';
 const cards = {};
 const lanes = {};
@@ -196,6 +196,12 @@ function healthOf(t) {
   if (t.status === 'broken' || t.status === 'error') return 'bad';
   if (t.status === 'waiting' || t.status === 'stopped' || !p) return 'idle';
   if (t.status === 'finished') return t.brokeAt ? 'bad' : 'ok';
+  const mode = S && S.params && isRunning() ? S.params.trafficMode : ctl.trafficMode;
+  if (isVpn() && mode === 'max') {
+    // the test goes on until the server is full: how close each resource is to its limit
+    const q = Math.max((p.cpu || 0) / 95, (p.memPct || 0) / 95, p.ctMax ? p.ct / p.ctMax / 0.95 : 0);
+    return q >= 1 ? 'bad' : q >= 0.75 ? 'warn' : 'ok';
+  }
   if (isVpn() && realTraffic()) {
     let q = Math.max(p.errPct / X.maxErrPct, (p.probeP95 || 0) / X.maxP95Ms);
     if (p.apdex != null && p.apdexN >= 20) q = Math.max(q, (100 - p.apdex) / Math.max(1, 100 - X.minApdex));
@@ -213,6 +219,7 @@ function pillOf(t, h) {
   if (t.status === 'stopped') return ['minus', 'متوقف شد'];
   if (t.status === 'finished') {
     if (t.result && t.result.limitedBy) return ['alert', 'تست‌کننده به سقفش رسید'];
+    if (t.result && t.result.saturated) return ['check', SAT[t.result.saturated] || 'به سقف رسید'];
     if (t.result && t.result.confirmed) return ['check', `ظرفیت ${fmt(t.result.capacity)} تأیید شد`];
     return t.brokeAt ? ['xoct', 'از کار افتاد'] : ['check', 'تا سقف دوام آورد'];
   }
@@ -222,6 +229,7 @@ function pillOf(t, h) {
   if (h === 'ok') return ['check', 'پایدار'];
   return ['minus', 'در حال آماده‌سازی'];
 }
+const SAT = { cpu: 'CPU پر شد', ram: 'RAM پر شد', nic: 'شبکه پر شد', conntrack: 'سقف conntrack', ports: 'سقف پورت‌ها', fd: 'سقف فایل‌های باز', errors: 'سرور اتصال رد کرد', crash: 'Xray از کار افتاد' };
 function stableUsers(t) {
   if (t.result) return t.result.capacity;
   let cap = 0;
@@ -327,6 +335,13 @@ function paintRace() {
   } else if (T.length === 1 && Object.keys(S.targets).length === 1 && ['done', 'stopped'].includes(S.status)) {
     const t = T[0];
     const R = t.result;
+    if (S.params && S.params.trafficMode === 'max' && !R.limitedBy) {
+      v.textContent = R.brokeAt
+        ? `سقف ${t.name}: ${fmt(R.capacity)} کاربر هم‌زمان (${fmt(R.peakConns)} اتصال باز) — در ${fmt(R.brokeAt)} کاربر: ${R.reason}`
+          + (R.qualityCap != null ? ` · کاربران تا ${fmt(R.qualityCap)} کاربر راضی بودند` : '')
+        : `${t.name} تا ${fmt(R.capacity)} کاربر (${fmt(R.peakConns)} اتصال باز) پر نشد — سقف کاربر تست را بالاتر ببرید`;
+      return;
+    }
     v.textContent = `ظرفیت پایدار ${t.name}: ${R.reachedMax || R.limitedBy ? '≥ ' : ''}${fmt(R.capacity)} کاربر هم‌زمان آنلاین`
       + (R.limitedBy ? ' — سرور داشبورد زودتر از پنل به سقفش رسید؛ عدد واقعی بالاتر است'
         : R.brokeAt ? ` — شکست در ${fmt(R.brokeAt)} کاربر (${R.reason})` + (R.confirmed === true ? '؛ ظرفیت با چند دقیقه نگه‌داشتن تأیید شد' : R.confirmed === false ? '؛ این عدد هم در نگه‌داشتن پایدار نماند' : '')
@@ -655,11 +670,12 @@ const SLIDERS = [
   ['stepUsers', 'trend', 1, 1000, 1, 'افزایش هر پله (کاربر)', ''],
   ['stepSeconds', 'clock', () => (ctl.trafficMode === 'steady' ? 5 : 60), 600, 5, () => (ctl.trafficMode === 'steady' ? 'مدت هر پله' : 'مدت هر پله (حداقل ۶۰ ثانیه تا بار واقعی روی سرور جمع شود)'), ' ثانیه'],
   ['maxUsers', 'flag', 100, 20000, 100, 'سقف کاربر', ''],
-  ['maxErrPct', 'alert', 0.5, 20, 0.5, 'حداکثر خطای مجاز', '%'],
+  ['connsPerUser', 'link', 1, 500, 1, 'اتصال باز هر کاربر (میانگین؛ هر کاربر بین نصف تا ۱.۵ برابرش)', '', 1, 'max'],
+  ['maxErrPct', 'alert', 0.5, 20, 0.5, 'حداکثر خطای مجاز', '%', 1, 'real steady'],
   ['maxP95Ms', 'hourglass', 100, 5000, 50, () => (ctl.trafficMode === 'steady' ? 'حداکثر تأخیر مجاز (p95)' : 'حداکثر زمان پاسخ VPN (p95 یک درخواست کوچک با اتصال تازه)'), ' ms'],
   ['userKbps', 'bolt', 0, 100, 0.1, () => (ctl.trafficMode === 'steady' ? 'سرعت هر کاربر (۰ = نامحدود)' : 'حداکثر سرعت خط هر کاربر (۰ = واقعی: هر کاربر بین ۴ تا ۳۰ Mbps)'), 'Mbps', 1000],
   ['minUserPct', 'trend', 10, 100, 5, 'حداقل سرعت قابل قبول (درصد از سرعت بالا)', '%', 1, 'steady'],
-  ['minApdex', 'trend', 50, 99, 1, 'حداقل رضایت کاربران (Apdex)', '%', 1, 'real'],
+  ['minApdex', 'trend', 50, 99, 1, () => (ctl.trafficMode === 'max' ? 'مرز رضایت کاربران (فقط ثبت می‌شود، تست را متوقف نمی‌کند)' : 'حداقل رضایت کاربران (Apdex)'), '%', 1, 'real max'],
 ];
 function drawRamp() {
   const n = Math.min(60, Math.ceil((ctl.maxUsers - ctl.startUsers) / ctl.stepUsers) + 1);
@@ -668,14 +684,15 @@ function drawRamp() {
 const TM_HINT = {
   real: 'هر کاربر یک گوشی است: سرعت خط خودش، ۳ تا ۸ اتصال پس‌زمینه که همیشه باز می‌ماند (پیام‌رسان، نوتیفیکیشن، اپ‌ها)، و کارهایی مثل آدم واقعی — پیام‌رسان، اینستاگرام، وب‌گردی با چند اتصال موازی، ویدیو، دانلود — با مکث بین‌شان. هر کاری که کاربر می‌کند امتیاز می‌گیرد (Apdex). معیار شکست: رضایت کاربران پایین بیاید، VPN کند شود، ویدیو گیر کند، یا RAM / جدول conntrack سرور پر شود. بعد از شکست، پله‌ی قبلی چند دقیقه نگه داشته می‌شود تا ظرفیت تأیید شود. «کاربر» یعنی کاربرِ هم‌زمان آنلاین؛ تعداد اکانتی که می‌شود فروخت معمولاً چند برابر این است.',
   steady: 'هر کاربر یک دانلود بی‌وقفه با دقیقاً همان سرعت است. برای فشار حداکثری روی پهنای باند.',
+  max: 'همان کاربرهای واقعی، ولی هر کاربر به تعداد تنظیم‌شده اتصال باز نگه می‌دارد، و تست تا جایی ادامه می‌دهد که خود سرور دیگر نکشد: CPU ده ثانیه پشت سر هم بالای ۹۵٪ بماند، RAM به ۹۵٪ برسد، شبکه پر شود (ترافیک با بیشتر شدن کاربران بالا نرود)، Xray از کار بیفتد یا سرور اتصال‌ها را رد کند. افت رضایت کاربران تست را متوقف نمی‌کند ولی ثبت می‌شود؛ نتیجه دو عدد است: تا کجا کاربران راضی بودند، و سقف سخت‌افزار. اگر سقف‌های کرنل (conntrack، پورت‌ها، فایل‌های باز) زودتر پر شوند، همان گزارش می‌شود با دستور بالا بردنش. یک گوشی معمولی ۲۰ تا ۶۰ اتصال هم‌زمان دارد؛ صدها اتصال یعنی کاربر خیلی سنگین.',
 };
 function openSetup() {
   renderSetup();
   $('#setup').showModal();
 }
 function renderSetup() {
-  $('#setupBody').innerHTML = `<div class="foot" style="margin-bottom:6px">الگوی ترافیک تست VPN</div><div class="seg tm" id="tmSeg" role="radiogroup">${[['real', 'واقعی (ترکیبی)'], ['steady', 'دانلود پیوسته']].map(([v, l]) => `<button type="button" role="radio" data-v="${v}" aria-checked="${ctl.trafficMode === v}">${l}</button>`).join('')}</div><div class="hint" style="margin:6px 0 14px">${TM_HINT[ctl.trafficMode === 'steady' ? 'steady' : 'real']}</div>` + `<div class="foot" style="margin-bottom:6px">شکل پله‌ها (هر ستون یک پله)</div><div class="ramp" id="rampPrev"></div>` +
-    SLIDERS.filter((x) => !x[8] || x[8] === (ctl.trafficMode === 'steady' ? 'steady' : 'real')).map(([k, icn, mn, max, step, lbl, unit, scale = 1]) => {
+  $('#setupBody').innerHTML = `<div class="foot" style="margin-bottom:6px">الگوی ترافیک تست VPN</div><div class="seg tm" id="tmSeg" role="radiogroup">${[['real', 'واقعی (ترکیبی)'], ['max', 'تا سقف سخت‌افزار'], ['steady', 'دانلود پیوسته']].map(([v, l]) => `<button type="button" role="radio" data-v="${v}" aria-checked="${ctl.trafficMode === v}">${l}</button>`).join('')}</div><div class="hint" style="margin:6px 0 14px">${TM_HINT[ctl.trafficMode] || TM_HINT.real}</div>` + `<div class="foot" style="margin-bottom:6px">شکل پله‌ها (هر ستون یک پله)</div><div class="ramp" id="rampPrev"></div>` +
+    SLIDERS.filter((x) => !x[8] || x[8].split(' ').includes(ctl.trafficMode || 'real')).map(([k, icn, mn, max, step, lbl, unit, scale = 1]) => {
       const label = typeof lbl === 'function' ? lbl() : lbl;
       const min = typeof mn === 'function' ? mn() : mn;
       if (ctl[k] / scale < min) ctl[k] = min * scale;

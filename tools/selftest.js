@@ -54,6 +54,33 @@ check('real traffic breaks on what users feel and on server limits', () => {
   assert.match(r.breachReason({ ...ok, memPct: 97 }), /RAM/);
 });
 
+check('max mode stops only on full hardware or kernel limits, and says which', () => {
+  const r = new Runner({ get() { return { test: {}, targets: [], generator: {} }; } });
+  r.p = { type: 'vpn', trafficMode: 'max', userKbps: 0, minApdex: 85, maxErrPct: 2, maxP95Ms: 1500 };
+  const ok = { errPct: 3, rps: 50, apdex: 60, apdexN: 80, probeP95: 3000, probeN: 40, videoN: 30, stallPct: 20, memPct: 80, cpu: 90, ct: 1000, ctMax: 262144, conns: 9000, portRange: 64512, coreFds: 20000, coreFdMax: 1048576, rx: 400, tx: 400 };
+  // unhappy users alone do not stop it: the server is not full yet
+  assert.equal(r.breachReason(ok), null);
+  assert.equal(r.maxReason({ ...ok, cpu: 96 })[0], 'cpu');
+  assert.equal(r.maxReason({ ...ok, memPct: 96 })[0], 'ram');
+  assert.equal(r.maxReason({ ...ok, ct: 250000 })[0], 'conntrack');
+  assert.equal(r.maxReason({ ...ok, conns: 60000 })[0], 'ports');
+  assert.equal(r.maxReason({ ...ok, coreFds: 1000, coreFdMax: 1024 })[0], 'fd');
+  assert.equal(r.maxReason({ ...ok, linkMbps: 1000, tx: 950 })[0], 'nic');
+  assert.equal(r.maxReason({ ...ok, errPct: 40 })[0], 'errors');
+  // kernel limits are reported before RAM/CPU: they are what really turns users away
+  assert.equal(r.maxReason({ ...ok, ct: 250000, memPct: 97 })[0], 'conntrack');
+  assert.match(r.qualityReason(ok), /کند شد/);
+});
+
+check('max mode: flat traffic while users grow is a full network', () => {
+  const r = new Runner({ get() { return { test: {}, targets: [], generator: {} }; } });
+  r.p = { type: 'vpn', trafficMode: 'max' };
+  const s = (users, mbps, apdex, cpu = 50) => ({ users, mbps, apdex, cpu });
+  assert.match(r.plateau([s(300, 800, 95), s(350, 810, 90), s(400, 805, 80)]), /شبکه/);
+  assert.equal(r.plateau([s(300, 600, 95), s(350, 700, 95), s(400, 800, 95)]), null); // still growing
+  assert.equal(r.plateau([s(300, 800, 95), s(350, 810, 90), s(400, 805, 80, 97)]), null); // that is the CPU
+});
+
 check('real traffic: steps are long enough for load to build up', () => {
   const seen = [];
   const store = { get() { return { test: { stepSeconds: 15, graceSec: 6, startUsers: 10, stepUsers: 10, maxUsers: 50, trafficMode: 'real' }, generator: {}, targets: [{ id: 'A', name: 'A', enabled: true, links: ['x'] }] }; } };
